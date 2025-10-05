@@ -56,6 +56,40 @@ def is_finger_extended(landmarks, finger_tip_id, finger_pip_id, finger_mcp_id):
     angle = calculate_angle(tip, pip, mcp)
     return angle > 140  # Increased threshold to be more strict
 
+def calculate_head_pose(face_landmarks, w, h):
+    """Calculate head yaw (left/right tilt) and pitch (forward/backward) from face landmarks"""
+    try:
+        landmarks = face_landmarks.landmark
+        
+        # Key face landmarks for head pose estimation
+        left_eye = landmarks[33]
+        right_eye = landmarks[263]
+        nose_tip = landmarks[1]
+        chin = landmarks[152]
+        forehead = landmarks[10]
+        
+        # Head tilt (left/right) - using eye height difference
+        left_eye_y = left_eye.y
+        right_eye_y = right_eye.y
+        # Calculate tilt: positive = tilt right, negative = tilt left
+        tilt = (right_eye_y - left_eye_y) * 200  # Scale factor for sensitivity
+        yaw = tilt  # Use tilt value as yaw for A/D movement
+        
+        # Pitch (forward/backward) - using nose position relative to eyes
+        nose_y = nose_tip.y
+        chin_y = chin.y
+        forehead_y = forehead.y
+        
+        # Calculate pitch based on nose position relative to eye center
+        eye_center_y = (left_eye.y + right_eye.y) / 2
+        pitch = (nose_y - eye_center_y) * 100  # Scale factor for sensitivity
+        
+        return yaw, pitch
+        
+    except Exception as e:
+        print(f"Head pose calculation error: {e}")
+        return 0, 0
+
 def is_gun_gesture(hand_landmarks):
     """Detect gun gesture (index out, bottom 3 curled)"""
     if hand_landmarks is None:
@@ -414,10 +448,9 @@ class KrunkerStyleMouseController:
     def update(self, hand_landmarks, gun_active):
         """Update target position from hand tracking (30 FPS) - cursor thread handles smooth movement (120 FPS)"""
         if not gun_active or hand_landmarks is None:
-            # Stop cursor thread when gun inactive
+            # Stop cursor thread when gun inactive but keep last position
             self.stop_cursor_thread()
-            self.last_x = None
-            self.last_y = None
+            # Don't reset last_x and last_y - keep them for continuity
             with self.thread_lock:
                 self.target_delta_x = 0
                 self.target_delta_y = 0
@@ -521,7 +554,7 @@ class LeftHandGestureController:
             return None, "Error"
 
 class WASDController:
-    """Hybrid controller: Head pose for W/S, body lean for A/D"""
+    """Hybrid controller: Head tilt for A/D, head pose for W/S"""
     def __init__(self, lean_threshold=3, pitch_threshold=8, pitch_threshold_back=12, hysteresis=0.7):
         self.lean_threshold = lean_threshold  # For A/D (left/right lean)
         self.pitch_threshold = pitch_threshold  # For W (head forward)
@@ -539,9 +572,9 @@ class WASDController:
         self.lean_key_press_start = {'a': 0, 'd': 0}  # Track when key was pressed
         self.debug_counter = 0
         
-    def update(self, left_right_lean, head_pitch, control_enabled):
+    def update(self, head_yaw, head_pitch, control_enabled):
         """
-        Update WASD keys based on body lean (A/D) and head pose (W/S)
+        Update WASD keys based on head tilt (A/D) and head pose (W/S)
         Returns: (active_keys, key_states)
         """
         if not control_enabled:
@@ -565,7 +598,7 @@ class WASDController:
         pitch_release_back = self.pitch_threshold_back * self.hysteresis
         
         # Release small lean keys if user returns to center
-        if left_right_lean >= -self.lean_threshold and left_right_lean <= self.lean_threshold:
+        if head_yaw >= -self.lean_threshold and head_yaw <= self.lean_threshold:
             if self.lean_key_state['a']:
                 pyautogui.keyUp('a')
                 self.lean_key_state['a'] = False
@@ -576,16 +609,16 @@ class WASDController:
                 print(f"🔄 Returned to center - Released 'D'")
         
         # Determine which keys should be pressed (with hysteresis)
-        # Left/Right lean (A/D) - using body lean with gradual movement
+        # Left/Right tilt (A/D) - using head tilt with gradual movement
         if 'a' in self.current_keys:
             # Already pressing A
-            if left_right_lean > -lean_release:
+            if head_yaw > -lean_release:
                 pass  # Release A
             else:
                 desired_keys.add('a')  # Keep pressing A
-        elif left_right_lean < -self.lean_threshold:
+        elif head_yaw < -self.lean_threshold:
             # Check if we should press A
-            if left_right_lean < -self.strong_lean_threshold:
+            if head_yaw < -self.strong_lean_threshold:
                 # Strong lean - hold down continuously
                 desired_keys.add('a')
             else:
@@ -598,7 +631,7 @@ class WASDController:
                         pyautogui.keyDown('a')
                         self.lean_key_state['a'] = True
                         self.lean_key_press_start['a'] = current_time
-                        print(f"🔄 Small lean LEFT: {left_right_lean:.1f}° - Holding 'A' for 1s")
+                        print(f"🔄 Small lean LEFT: {head_yaw:.1f}° - Holding 'A' for 1s")
                 else:
                     # Key is currently held - check if we should release it
                     hold_duration = current_time - self.lean_key_press_start['a']
@@ -607,17 +640,17 @@ class WASDController:
                         pyautogui.keyUp('a')
                         self.lean_key_state['a'] = False
                         self.last_lean_press_time['a'] = current_time
-                        print(f"🔄 Small lean LEFT: {left_right_lean:.1f}° - Released 'A', waiting 75ms")
+                        print(f"🔄 Small lean LEFT: {head_yaw:.1f}° - Released 'A', waiting 75ms")
             
         if 'd' in self.current_keys:
             # Already pressing D
-            if left_right_lean < lean_release:
+            if head_yaw < lean_release:
                 pass  # Release D
             else:
                 desired_keys.add('d')  # Keep pressing D
-        elif left_right_lean > self.lean_threshold:
+        elif head_yaw > self.lean_threshold:
             # Check if we should press D
-            if left_right_lean > self.strong_lean_threshold:
+            if head_yaw > self.strong_lean_threshold:
                 # Strong lean - hold down continuously
                 desired_keys.add('d')
             else:
@@ -630,7 +663,7 @@ class WASDController:
                         pyautogui.keyDown('d')
                         self.lean_key_state['d'] = True
                         self.lean_key_press_start['d'] = current_time
-                        print(f"🔄 Small lean RIGHT: {left_right_lean:.1f}° - Holding 'D' for 1s")
+                        print(f"🔄 Small lean RIGHT: {head_yaw:.1f}° - Holding 'D' for 1s")
                 else:
                     # Key is currently held - check if we should release it
                     hold_duration = current_time - self.lean_key_press_start['d']
@@ -639,7 +672,7 @@ class WASDController:
                         pyautogui.keyUp('d')
                         self.lean_key_state['d'] = False
                         self.last_lean_press_time['d'] = current_time
-                        print(f"🔄 Small lean RIGHT: {left_right_lean:.1f}° - Released 'D', waiting 75ms")
+                        print(f"🔄 Small lean RIGHT: {head_yaw:.1f}° - Released 'D', waiting 75ms")
             
         # Forward/Backward (W/S) - using head pose (switched W and S)
         if 'w' in self.current_keys:
@@ -772,7 +805,7 @@ class LeaningControlSystem:
         self.ui_overlay = MediaPipeOverlay(self.config_manager)
         
         print("Hybrid Control System initialized!")
-        print("Movement: Head pose for W/S + Body lean for A/D")
+        print("Movement: Head tilt for A/D + Head pose for W/S")
         print("Right hand: Gun control + shooting + Krunker-style mouse")
         print("Left hand: Crouch/jump")
         print("Tongue: Spray emote")
@@ -897,7 +930,6 @@ class LeaningControlSystem:
                     face_results = self.face_mesh.process(rgb_frame)
                 
                 # Initialize status variables
-                left_right_lean = 0
                 head_yaw, head_pitch = 0, 0
                 active_wasd_keys = set()
                 wasd_states = {'w': False, 'a': False, 's': False, 'd': False}
@@ -920,8 +952,7 @@ class LeaningControlSystem:
                             mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2)
                         )
                         
-                        # Body leaning for A/D only
-                        left_right_lean = calculate_lean_pose(pose_results.pose_landmarks, w, h)
+                        # No body lean needed - using head tilt for A/D
                         
                     except Exception as e:
                         print(f"Error processing pose: {e}")
@@ -948,13 +979,13 @@ class LeaningControlSystem:
                     except Exception as e:
                         print(f"Error processing face: {e}")
                 
-                # Update WASD controller with both body lean (A/D) and head pose (W/S)
+                # Update WASD controller with head tilt (A/D) and head pose (W/S)
                 active_wasd_keys, wasd_states = self.wasd_controller.update(
-                    left_right_lean, head_pitch, self.control_enabled
+                    head_yaw, head_pitch, self.control_enabled
                 )
                 
                 # Debug output for hybrid detection
-                # print(f"DEBUG: Left/Right Lean={left_right_lean:.1f}, Head Pitch={head_pitch:.1f}")
+                # print(f"DEBUG: Head Yaw (A/D)={head_yaw:.1f}, Head Pitch (W/S)={head_pitch:.1f}")
                 
                 # Process hands
                 if hand_results and hand_results.multi_hand_landmarks:
