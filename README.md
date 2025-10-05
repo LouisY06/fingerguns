@@ -99,9 +99,27 @@ The system uses `gesture_config.json` for configuration. Key settings include:
 - `pitch_threshold_forward`: Head forward threshold (1.0-30.0)
 - `pitch_threshold_backward`: Head backward threshold (1.0-30.0)
 
+## Technologies Used
+
+**Languages**: Python 3.8+, JSON
+
+**Frameworks & Libraries**: MediaPipe, OpenCV, PyAutoGUI, NumPy, pynput, Pillow (PIL)
+
+**Platforms**: macOS (Quartz framework), Cross-platform Python
+
+**Development Tools**: pytest, black, flake8, Git
+
+**Data Storage**: JSON configuration files (no database)
+
+**Computer Vision**: MediaPipe (hands, pose, face mesh), OpenCV (camera capture and processing)
+
+**Input/Output**: PyAutoGUI (mouse/keyboard automation), pynput (input monitoring), Quartz (macOS system events)
+
+**UI/Graphics**: OpenCV (overlay rendering), Pillow (image processing)
+
 ## Requirements
 
-- Python 3.9-3.12
+- Python 3.8+
 - OpenCV
 - MediaPipe
 - PyAutoGUI
