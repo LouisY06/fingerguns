@@ -24,6 +24,13 @@ from Quartz import (
     CGEventSetIntegerValueField, kCGEventSourceStatePrivate
 )
 
+# Import UI modules
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ui.overlay import MediaPipeOverlay
+from ui.config_manager import ConfigManager
+
 # PyAutoGUI Configuration for continuous key holding
 pyautogui.PAUSE = 0  # Remove pause for continuous operation
 pyautogui.FAILSAFE = False  # Disable failsafe for gesture control
@@ -695,11 +702,19 @@ class LeaningControlSystem:
         # Control state
         self.control_enabled = False
         
+        # Initialize UI components
+        self.config_manager = ConfigManager()
+        self.ui_overlay = MediaPipeOverlay(self.config_manager)
+        
         print("Hybrid Control System initialized!")
         print("Movement: Head pose for W/S + Body lean for A/D")
         print("Right hand: Gun control + shooting + Krunker-style mouse")
         print("Left hand: Crouch/jump")
         print("Tongue: Spray emote")
+        print("Press 'C' to toggle configuration panel")
+        print("Press 'H' to toggle help panel")
+        print("Press 'M' to toggle gesture mapping")
+        print("Use arrow keys to navigate UI")
     
     
     def identify_hands(self, hand_landmarks_list):
@@ -740,6 +755,14 @@ class LeaningControlSystem:
         print("=" * 50)
         print("Controls:")
         print("  'g' - Toggle control ON/OFF")
+        print("  'c' - Toggle configuration panel")
+        print("  'h' - Toggle help panel")
+        print("  'm' - Toggle gesture mapping")
+        print("  'tab' - Switch UI panels")
+        print("  'arrow keys' - Navigate UI / Adjust config values")
+        print("  'enter' - Select/confirm")
+        print("  '1/2' - Adjust config values (legacy)")
+        print("  '3/4' - Fine adjust config values (legacy)")
         print("  '+' - Increase crosshair sensitivity (large)")
         print("  '-' - Decrease crosshair sensitivity (large)")
         print("  '=' - Increase crosshair sensitivity (small)")
@@ -919,16 +942,34 @@ class LeaningControlSystem:
                     except Exception as e:
                         print(f"Error processing hands: {e}")
                 
-                # Display status overlay
-                self.display_status(frame, wasd_states, gun_active, shoot_status, 
-                                  left_status, tongue_status, left_right_lean, head_pitch, tongue_out)
+                # Prepare results for UI overlay
+                results = {
+                    'left_hand_gesture': [left_status, None],
+                    'right_hand_gesture': ["gun" if gun_active else None, "thumb_down" if is_shooting else "thumb_up" if gun_active else None],
+                    'head_pose': {'pitch': head_pitch, 'yaw': head_yaw},
+                    'body_lean': {'lean': left_right_lean},
+                    'tongue_out': tongue_out
+                }
+                
+                # Draw gesture overlay
+                frame = self.ui_overlay.draw_gesture_overlay(frame, results)
+                
+                # Draw UI panels
+                self.ui_overlay.draw_all_panels(frame)
                 
                 # Show frame
                 cv2.imshow('Hybrid Control System', frame)
                 
-                # Handle keyboard input (with longer wait for better responsiveness)
+                # Handle keyboard input
                 try:
-                    key = cv2.waitKey(30) & 0xFF
+                    key = cv2.waitKey(30)
+                    if key == -1:  # No key pressed
+                        continue
+                    
+                    # Debug: Print key codes to understand what's being detected
+                    if self.ui_overlay.show_config_panel:
+                        print(f"🔍 Key pressed: {key} (0x{key:02X})")
+                    
                     if key == ord('q') or key == 27:  # 'q' or ESC to quit
                         print("Quit key pressed - exiting...")
                         break
@@ -964,6 +1005,18 @@ class LeaningControlSystem:
                     elif key == ord('6'):
                         self.mouse_controller.krunker_controller.dead_zone = max(0.5, self.mouse_controller.krunker_controller.dead_zone - 0.5)
                         print(f"🚫 Dead zone decreased to {self.mouse_controller.krunker_controller.dead_zone:.1f}")
+                    elif key == ord('1'):  # Increase selected config value
+                        self.ui_overlay.adjust_config_value(0.1, self.mouse_controller)
+                    elif key == ord('2'):  # Decrease selected config value
+                        self.ui_overlay.adjust_config_value(-0.1, self.mouse_controller)
+                    elif key == ord('3'):  # Fine increase
+                        self.ui_overlay.adjust_config_value(0.01, self.mouse_controller)
+                    elif key == ord('4'):  # Fine decrease
+                        self.ui_overlay.adjust_config_value(-0.01, self.mouse_controller)
+                    else:
+                        # Handle UI overlay keyboard input
+                        self.ui_overlay.handle_keyboard_input(key, self.mouse_controller)
+                        
                 except Exception as e:
                     print(f"Error handling keyboard input: {e}")
                     
@@ -993,83 +1046,7 @@ class LeaningControlSystem:
             except Exception as e:
                 print(f"Error during cleanup: {e}")
     
-    def display_status(self, frame, wasd_states, gun_active, shoot_status, 
-                      left_status, tongue_status, left_right_lean, head_pitch, tongue_out):
-        """Display clean, organized status overlay"""
-        h, w = frame.shape[:2]
-        
-        # Create semi-transparent background panels
-        self._draw_panel(frame, 10, 10, 300, 120, "CONTROL STATUS", alpha=0.8)
-        self._draw_panel(frame, w - 200, 10, 180, 100, "MOVEMENT", alpha=0.8)
-        self._draw_panel(frame, 10, h - 150, 350, 130, "GESTURE STATUS", alpha=0.8)
-        
-        # Main control status (top left)
-        control_status = "CONTROL: ON ✓" if self.control_enabled else "CONTROL: OFF ✗"
-        control_color = (0, 255, 0) if self.control_enabled else (0, 0, 255)
-        cv2.putText(frame, control_status, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, control_color, 2)
-        
-        # Toggle instruction
-        cv2.putText(frame, "Press 'G' to toggle (click window first!)", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-        cv2.putText(frame, "Press 'Q' to quit", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-        
-        # Movement overlay (top right) - Clean WASD display
-        self._draw_wasd_overlay(frame, w - 190, 30, wasd_states)
-        
-        # Gesture status panel (bottom left) - Organized layout
-        y_start = h - 130
-        
-        # Right hand (gun)
-        gun_color = (0, 255, 0) if gun_active else (128, 128, 128)
-        cv2.putText(frame, f"🔫 Gun: {'ACTIVE' if gun_active else 'INACTIVE'}", (20, y_start + 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, gun_color, 2)
-        if gun_active:
-            cv2.putText(frame, f"   Shoot: {shoot_status}", (20, y_start + 45), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # Left hand
-        cv2.putText(frame, f"✋ Left: {left_status}", (20, y_start + 70), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # Tongue
-        tongue_color = (0, 255, 0) if tongue_out else (128, 128, 128)
-        cv2.putText(frame, f"👅 Tongue: {tongue_status}", (20, y_start + 95), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, tongue_color, 2)
     
-    def _draw_panel(self, frame, x, y, width, height, title, alpha=0.7):
-        """Draw a semi-transparent panel with title"""
-        # Create overlay
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (x, y), (x + width, y + height), (0, 0, 0), -1)
-        cv2.rectangle(overlay, (x, y), (x + width, y + height), (255, 255, 255), 2)
-        
-        # Blend overlay
-        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-        
-        # Add title
-        cv2.putText(frame, title, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    
-    def _draw_wasd_overlay(self, frame, x, y, wasd_states):
-        """Draw clean WASD movement indicator"""
-        # Draw key indicators in a clean layout
-        key_positions = {
-            'w': (x + 80, y + 25),
-            'a': (x + 40, y + 50),
-            's': (x + 80, y + 50),
-            'd': (x + 120, y + 50)
-        }
-        
-        # Draw active keys
-        active_keys = [key for key, active in wasd_states.items() if active]
-        if active_keys:
-            cv2.putText(frame, f"Moving: {' '.join([k.upper() for k in active_keys])}", 
-                       (x + 10, y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-        
-        # Draw key circles
-        for key, (kx, ky) in key_positions.items():
-            color = (0, 255, 0) if wasd_states[key] else (60, 60, 60)
-            cv2.circle(frame, (kx, ky), 12, color, -1)
-            cv2.circle(frame, (kx, ky), 12, (255, 255, 255), 1)
-            cv2.putText(frame, key.upper(), (kx - 6, ky + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
 
 if __name__ == "__main__":
     system = LeaningControlSystem()
