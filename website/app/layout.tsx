@@ -4,8 +4,13 @@ import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 
 export const metadata: Metadata = {
-  title: "FingerGuns - Control CSGO with Hand Gestures",
-  description: "Revolutionary computer vision technology enabling natural hand gesture and head tracking controls for Counter-Strike: Global Offensive.",
+  title: "FingerGuns - Control CS:GO with Hand Gestures",
+  description: "Revolutionary computer vision technology enabling natural hand gesture, body leaning, and head tracking controls for Counter-Strike: Global Offensive.",
+  icons: {
+    icon: "/fingergunslogo.png",
+    shortcut: "/fingergunslogo.png",
+    apple: "/fingergunslogo.png",
+  },
 };
 
 export default function RootLayout({

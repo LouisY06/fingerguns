@@ -34,7 +34,7 @@ export default function About() {
             <div className="bg-black border border-gray-800 p-8">
               <blockquote className="border-l-4 border-white pl-6">
                 <p className="body-text text-gray-300 italic mb-4">
-                  &ldquo;We set out to prove that the future of gaming interfaces doesn&apos;t require expensive hardware—just intelligent software and a standard webcam.&rdquo;
+                  &ldquo;Steve Jobs believed the best precision device is your finger. We took that philosophy further—why not eliminate the mouse entirely?&rdquo;
                 </p>
                 <cite className="body-text text-gray-500 not-italic">— FingerGuns Development Team</cite>
               </blockquote>
@@ -52,52 +52,74 @@ export default function About() {
             </div>
             <h2 className="h2-text text-white mb-4">Advanced Technology Stack</h2>
             <p className="body-text text-gray-400 max-w-2xl mx-auto">
-              Built on state-of-the-art computer vision frameworks and optimized for real-time performance.
+              Built on MediaPipe with optimization techniques inspired by NVIDIA&apos;s frame generation technology.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
             <div className="bg-gray-950 border border-gray-800 p-8">
-              <h3 className="h4-text text-white mb-4">Computer Vision</h3>
+              <h3 className="h4-text text-white mb-4">MediaPipe Integration</h3>
               <p className="body-text text-gray-400 mb-4">
-                Powered by MediaPipe&apos;s industry-leading hand and face tracking solutions, providing accurate landmark detection with minimal latency.
+                Multi-model computer vision pipeline processing hands, pose, and facial landmarks in parallel at 30 FPS.
               </p>
               <ul className="space-y-2">
                 <li className="body-text text-sm text-gray-400 flex items-start">
                   <CheckCircle className="text-white mr-2 flex-shrink-0 mt-1" size={16} />
-                  21-point hand landmark detection
+                  Dual 21-point hand tracking
                 </li>
                 <li className="body-text text-sm text-gray-400 flex items-start">
                   <CheckCircle className="text-white mr-2 flex-shrink-0 mt-1" size={16} />
-                  468-point face mesh tracking
+                  468-point face mesh for head pose
                 </li>
                 <li className="body-text text-sm text-gray-400 flex items-start">
                   <CheckCircle className="text-white mr-2 flex-shrink-0 mt-1" size={16} />
-                  Real-time pose estimation
+                  33-point pose estimation for body lean
                 </li>
               </ul>
             </div>
 
             <div className="bg-gray-950 border border-gray-800 p-8">
-              <h3 className="h4-text text-white mb-4">Machine Learning</h3>
+              <h3 className="h4-text text-white mb-4">NVIDIA-Inspired Interpolation</h3>
               <p className="body-text text-gray-400 mb-4">
-                Custom gesture recognition algorithms trained to distinguish intentional game commands from ambient movements.
+                Vision pipeline produces movement deltas at 30 FPS. A 120 Hz cursor thread drains the delta backlog, applying micro-steps to fill gaps between frames.
               </p>
               <ul className="space-y-2">
                 <li className="body-text text-sm text-gray-400 flex items-start">
                   <CheckCircle className="text-white mr-2 flex-shrink-0 mt-1" size={16} />
-                  Adaptive threshold calibration
+                  Delta backlog accumulation (30 FPS input)
                 </li>
                 <li className="body-text text-sm text-gray-400 flex items-start">
                   <CheckCircle className="text-white mr-2 flex-shrink-0 mt-1" size={16} />
-                  Motion smoothing algorithms
+                  Fractional drain per tick (120 Hz output)
                 </li>
                 <li className="body-text text-sm text-gray-400 flex items-start">
                   <CheckCircle className="text-white mr-2 flex-shrink-0 mt-1" size={16} />
-                  Low-latency input processing
+                  ~8-10ms latency, no jumps or overshoot
                 </li>
               </ul>
             </div>
+          </div>
+
+          {/* Math Explanation */}
+          <div className="bg-gray-950 border border-gray-800 p-8">
+            <h3 className="h4-text text-white mb-4">Gradient Descent Analogy</h3>
+            <p className="body-text text-gray-400 mb-4">
+              Each 30 FPS vision frame adds a movement delta to the backlog. The 120 Hz cursor thread exponentially drains this backlog by applying a fraction each tick:
+            </p>
+            <div className="bg-black p-6 rounded font-mono text-sm text-gray-300 mb-4 overflow-x-auto">
+              <div className="mb-2">backlog<sub>t+1</sub> = backlog<sub>t</sub> + new_delta  <span className="text-gray-500">// 30 FPS</span></div>
+              <div className="mb-2">movement = α · backlog<sub>t</sub>  <span className="text-gray-500">// 120 Hz</span></div>
+              <div className="mb-2">backlog<sub>t+1</sub> = backlog<sub>t</sub> - movement</div>
+              <div className="text-gray-500 text-xs mt-4">
+                where α = 0.15 (drain rate per tick)
+              </div>
+            </div>
+            <p className="body-text text-gray-400 mb-4">
+              Like gradient descent exponentially reduces error, the cursor thread exponentially drains the backlog vector. Each tick subtracts a fraction of the remaining distance, creating micro-steps that transform discrete 30 FPS motion into continuous 120 Hz smoothness.
+            </p>
+            <p className="body-text text-gray-400">
+              Inspired by NVIDIA DLSS 3&apos;s frame generation philosophy: decouple input rate (30 FPS vision) from output rate (120 Hz cursor). The result is near-instant responsiveness with buttery-smooth motion—no prediction, just intelligent backlog management.
+            </p>
           </div>
         </div>
       </section>
@@ -140,7 +162,7 @@ export default function About() {
             FingerGuns was developed by a team of computer vision engineers and gaming enthusiasts who wanted to push the boundaries of what&apos;s possible with modern machine learning frameworks.
           </p>
           <p className="body-text text-gray-400 max-w-3xl mx-auto">
-            What started as a hackathon experiment has evolved into a fully-featured control system that demonstrates the potential of gesture-based interfaces in gaming.
+            What started as a hackathon thought experiment has evolved into a fully-featured control system that demonstrates the potential of gesture-based interfaces in gaming.
           </p>
         </div>
       </section>

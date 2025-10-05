@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { Menu, X } from 'lucide-react';
 import { useState } from 'react';
 
@@ -10,6 +11,7 @@ export default function Navigation() {
   const navItems = [
     { label: 'Home', href: '/' },
     { label: 'About', href: '/about' },
+    { label: 'Documentation', href: '/docs' },
     { label: 'GitHub', href: 'https://github.com/LouisY06/fingerguns', external: true },
     { label: 'Download', href: '/download' },
   ];
@@ -19,7 +21,14 @@ export default function Navigation() {
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2">
+          <Link href="/" className="flex items-center space-x-3">
+            <Image 
+              src="/fingergunslogo.png" 
+              alt="FingerGuns Logo" 
+              width={40} 
+              height={40}
+              className="w-10 h-10"
+            />
             <span className="brand-text text-2xl text-white">FingerGuns</span>
           </Link>
 
