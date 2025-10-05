@@ -990,11 +990,6 @@ class LeaningControlSystem:
                 self.display_status(frame, wasd_states, gun_active, shoot_status, 
                                   left_status, tongue_status, head_yaw, head_pitch, tongue_out)
                 
-                # Add HUGE flashing reminder to toggle
-                reminder_color = (0, 255, 255) if (frame_count // 5) % 2 == 0 else (255, 0, 255)
-                cv2.putText(frame, ">>> CLICK HERE THEN PRESS 'G' <<<", (w//2 - 300, h - 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.0, reminder_color, 3)
-                
                 # Show frame
                 cv2.imshow('Hybrid Control System', frame)
                 # Try to bring window to front
