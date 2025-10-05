@@ -3,10 +3,10 @@ LEANING CONTROL SYSTEM
 Combines:
 - Dual hand tracking (from dual_hand_tracking.py)
 - Body leaning detection for WASD movement (modified from head tracking)
-- Mouth open detection for scope/right click (modified from tongue_tracking.py)
+- Tongue tracking for spray emote (from tongue_tracking.py)
 
 Controls:
-- 'g' to toggle control ON/OFF
+- 't' to toggle control ON/OFF
 - ESC to quit
 """
 
@@ -16,6 +16,8 @@ import numpy as np
 import pyautogui
 import time
 import threading
+from pynput.mouse import Controller as MouseController
+import Quartz
 from Quartz import (
     CGEventCreateMouseEvent, CGEventPost, CGEventSourceCreate,
     kCGEventMouseMoved, kCGEventLeftMouseDown, kCGEventLeftMouseUp,
@@ -166,10 +168,6 @@ def detect_left_hand_gestures(hand_landmarks):
         # Pinky + Thumb up (index, middle, ring down) → Interact (E)
         elif pinky_up and thumb_up and not index_up and not middle_up and not ring_up:
             return "interact", "e"
-        
-        # Index + Thumb up (middle, ring, pinky down) → Spray (T)
-        elif index_up and thumb_up and not middle_up and not ring_up and not pinky_up:
-            return "spray", "t"
         
         # Only Index up → Jump (Space)
         elif index_up and not thumb_up and not middle_up and not ring_up and not pinky_up:
@@ -344,50 +342,27 @@ class KrunkerStyleMouseController:
         self.cursor_update_rate = 120  # Hz - cursor updates per second
         self.interpolation_speed = 0.15  # How fast to interpolate (0-1, lower = smoother, less overshoot)
         
-        # Track discontinuations to prevent snapping after repositioning
-        self.last_update_time = None
-        self.discontinuation_threshold = 0.1  # 100ms - if no update for this long, treat as discontinuation
-        
     def _move_mouse_native(self, delta_x, delta_y):
-        """Use native macOS CGEvent with delta fields for Krunker Pointer Lock compatibility"""
+        """Use native macOS CGEvent with delta fields"""
         try:
             from Quartz.CoreGraphics import (
                 CGEventCreate, CGEventGetLocation, CGEventCreateMouseEvent,
                 CGEventSetIntegerValueField, CGEventPost, kCGHIDEventTap,
-                kCGEventMouseMoved, kCGMouseEventDeltaX, kCGMouseEventDeltaY,
-                CGDisplayBounds, CGMainDisplayID, CGWarpMouseCursorPosition
+                kCGEventMouseMoved, kCGMouseEventDeltaX, kCGMouseEventDeltaY
             )
-            
-            # Get screen bounds
-            screen_bounds = CGDisplayBounds(CGMainDisplayID())
-            screen_width = screen_bounds.size.width
-            screen_height = screen_bounds.size.height
-            screen_center_x = screen_width / 2
-            screen_center_y = screen_height / 2
             
             # Get current mouse position
             event = CGEventCreate(None)
             current_pos = CGEventGetLocation(event)
             
-            # Strategy: Keep cursor centered to work with Pointer Lock
-            # Pointer Lock expects the cursor to stay in one place while deltas are sent
-            # If cursor drifts too far from center, recenter it
-            distance_from_center = ((current_pos.x - screen_center_x)**2 + (current_pos.y - screen_center_y)**2)**0.5
+            # Calculate new position
+            new_x = current_pos.x + delta_x
+            new_y = current_pos.y + delta_y
             
-            if distance_from_center > 50:  # If more than 50px from center, recenter
-                # Silently recenter cursor without sending movement event
-                CGWarpMouseCursorPosition((screen_center_x, screen_center_y))
-                new_x = screen_center_x
-                new_y = screen_center_y
-            else:
-                # Keep cursor near center
-                new_x = screen_center_x
-                new_y = screen_center_y
-            
-            # Create mouse move event at center position
+            # Create mouse move event
             move_event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, (new_x, new_y), 0)
             
-            # Set the delta fields - THIS is what Pointer Lock reads for camera movement
+            # Set the delta fields explicitly
             CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaX, int(delta_x))
             CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaY, int(delta_y))
             
@@ -453,15 +428,10 @@ class KrunkerStyleMouseController:
     
     def update(self, hand_landmarks, gun_active):
         """Update target position from hand tracking (30 FPS) - cursor thread handles smooth movement (120 FPS)"""
-        current_time = time.time()
-        
         if not gun_active or hand_landmarks is None:
-            # Stop cursor thread when gun inactive and reset position for repositioning
+            # Stop cursor thread when gun inactive but keep last position
             self.stop_cursor_thread()
-            # Reset last_x and last_y to allow repositioning when gun is not locked
-            self.last_x = None
-            self.last_y = None
-            self.last_update_time = None  # Mark discontinuation
+            # Don't reset last_x and last_y - keep them for continuity
             with self.thread_lock:
                 self.target_delta_x = 0
                 self.target_delta_y = 0
@@ -480,11 +450,7 @@ class KrunkerStyleMouseController:
             current_x = index_tip.x * 1920
             current_y = index_tip.y * 1080
             
-            # Check for discontinuation (gap in tracking)
-            is_discontinuation = (self.last_update_time is None or 
-                                 (current_time - self.last_update_time) > self.discontinuation_threshold)
-            
-            if self.last_x is not None and self.last_y is not None and not is_discontinuation:
+            if self.last_x is not None and self.last_y is not None:
                 # Calculate raw delta movement
                 raw_delta_x = (current_x - self.last_x) * self.sensitivity
                 raw_delta_y = (current_y - self.last_y) * self.sensitivity
@@ -506,14 +472,9 @@ class KrunkerStyleMouseController:
                     print(f"📍 Cursor Thread: raw=({int(raw_delta_x)},{int(raw_delta_y)}) "
                           f"target=({int(self.target_delta_x)},{int(self.target_delta_y)}) "
                           f"current=({int(self.current_delta_x)},{int(self.current_delta_y)})")
-            elif is_discontinuation:
-                # After discontinuation, just set baseline without applying delta
-                print("🔄 Discontinuation detected - resetting baseline for reswipe")
             
-            # Update tracking state
             self.last_x = current_x
             self.last_y = current_y
-            self.last_update_time = current_time
             
         except Exception as e:
             print(f"Mouse control error: {e}")
@@ -742,36 +703,32 @@ class WASDController:
         self.current_keys = set()
 
 class TongueController:
-    """Mouth open detection controller for scope/right click (from tongue_tracking.py)"""
+    """Tongue detection controller for spray emote (from tongue_tracking.py)"""
     def __init__(self, sensitivity=0.015, debounce_frames=10):
         self.sensitivity = sensitivity
         self.debounce_frames = debounce_frames
         self.frames_held = 0
-        self.is_scoped = False
+        self.last_tongue_out = False
         
     def update(self, face_landmarks, control_enabled):
         if not control_enabled or face_landmarks is None:
             self.frames_held = 0
-            if self.is_scoped:
-                pyautogui.mouseUp(button='right')
-                self.is_scoped = False
+            self.last_tongue_out = False
             return False, "Control Disabled"
         
-        mouth_open = detect_mouth_open(face_landmarks)
+        tongue_out = detect_mouth_open(face_landmarks)
         
-        if mouth_open:
+        if tongue_out:
             self.frames_held += 1
-            if self.frames_held >= self.debounce_frames and not self.is_scoped:
-                pyautogui.mouseDown(button='right')
-                self.is_scoped = True
-                return True, "Scoping (right click held)!"
+            if self.frames_held >= self.debounce_frames and not self.last_tongue_out:
+                pyautogui.press('t')
+                self.last_tongue_out = True
+                return True, "Tongue out - T pressed!"
         else:
             self.frames_held = 0
-            if self.is_scoped:
-                pyautogui.mouseUp(button='right')
-                self.is_scoped = False
+            self.last_tongue_out = False
         
-        return mouth_open, "Scope ready"
+        return tongue_out, "Tongue ready"
 
 class LeaningControlSystem:
     """Complete leaning-based CS:GO control system"""
@@ -800,7 +757,7 @@ class LeaningControlSystem:
         )
         
         # Sensitivity control (0.1 to 1.0)
-        self.sensitivity = 0.9
+        self.sensitivity = 0.5
         
         # Initialize controllers
         self.wasd_controller = WASDController()
@@ -819,8 +776,8 @@ class LeaningControlSystem:
         print("Hybrid Control System initialized!")
         print("Movement: Head tilt for A/D + Head pose for W/S")
         print("Right hand: Gun control + shooting + Krunker-style mouse")
-        print("Left hand: Jump/Knife/Interact/Spray")
-        print("Mouth: Scope (right click)")
+        print("Left hand: Crouch/jump")
+        print("Tongue: Spray emote")
     
     
     def identify_hands(self, hand_landmarks_list):
@@ -880,10 +837,9 @@ class LeaningControlSystem:
         print("  - Index finger up (only) = Press 'SPACE' (Jump)")
         print("  - Pinky + Index + Thumb up = Press 'Q' (Knife)")
         print("  - Pinky + Thumb up = Press 'E' (Interact)")
-        print("  - Index + Thumb up = Press 'T' (Spray)")
         print("  - Other positions = No action")
-        print("\nMouth Open:")
-        print("  - Open mouth = Right Click (Scope/Aim)")
+        print("\nTongue:")
+        print("  - Stick out tongue = Press 'T' (Spray emote)")
         print("\nPerfect for hybrid CS:GO control!")
         print("=" * 50)
         print("⚠️  IMPORTANT: Click on the camera window to enable keyboard controls!")
@@ -967,7 +923,7 @@ class LeaningControlSystem:
                         # Head pose for W/S movement
                         head_yaw, head_pitch = calculate_head_pose(face_landmarks, w, h)
                         
-                        # Mouth open detection for scope
+                        # Tongue detection for spray emote
                         tongue_out, tongue_status = self.tongue_controller.update(
                             face_landmarks, self.control_enabled
                         )
@@ -1048,11 +1004,6 @@ class LeaningControlSystem:
                 cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 1)
                 cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 0)
                 
-                # Check if window was closed (red X button)
-                if cv2.getWindowProperty('Hybrid Control System', cv2.WND_PROP_VISIBLE) < 1:
-                    print("Window closed - exiting...")
-                    break
-                
                 # Handle keyboard input (minimal wait for maximum FPS)
                 try:
                     key = cv2.waitKey(1) & 0xFF
@@ -1090,9 +1041,6 @@ class LeaningControlSystem:
                 print("Cleaning up resources...")
                 self.shooting_controller.force_release()
                 self.wasd_controller.release_all_keys()
-                # Release scope/right click if held
-                if self.tongue_controller.is_scoped:
-                    pyautogui.mouseUp(button='right')
                 # Stop cursor thread
                 self.mouse_controller.krunker_controller.stop_cursor_thread()
                 # Clean up mouse controller
@@ -1151,10 +1099,10 @@ class LeaningControlSystem:
         cv2.putText(frame, f"✋ Left: {left_status}", (20, y_start + 70), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
-        # Mouth/Scope
-        mouth_color = (0, 255, 0) if tongue_out else (128, 128, 128)
-        cv2.putText(frame, f"👄 Scope: {tongue_status}", (20, y_start + 95), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, mouth_color, 2)
+        # Tongue
+        tongue_color = (0, 255, 0) if tongue_out else (128, 128, 128)
+        cv2.putText(frame, f"👅 Tongue: {tongue_status}", (20, y_start + 95), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, tongue_color, 2)
     
     def _draw_panel(self, frame, x, y, width, height, title, alpha=0.7):
         """Draw a semi-transparent panel with title"""
