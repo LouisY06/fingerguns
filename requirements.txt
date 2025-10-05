@@ -17,12 +17,6 @@ pygame>=2.5.0
 
 # Additional utilities
 pillow>=10.0.0
-threading
-queue
-collections
-time
-json
-configparser
 
 # Optional: For advanced features
 pydub>=0.25.1

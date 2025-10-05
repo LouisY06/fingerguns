@@ -15,6 +15,7 @@ import mediapipe as mp
 import numpy as np
 import pyautogui
 import time
+import threading
 from pynput.mouse import Controller as MouseController
 import Quartz
 from Quartz import (
@@ -292,31 +293,39 @@ class ThumbShootingController:
             self.is_pressed = False
 
 class KrunkerStyleMouseController:
-    """Mouse controller with smooth movement and adjustable sensitivity"""
+    """Mouse controller with high-frequency cursor thread for smooth finger gun tracking"""
     def __init__(self):
-        self.sensitivity = 2.5  # Increased for more responsive crosshair
+        self.sensitivity = 2.5
         self.last_x = None
         self.last_y = None
         self.debug_counter = 0
         
-        # Reduced smoothing for more responsive movement
-        self.smoothing_factor = 0.75  # Reduced from 0.92 for more responsiveness
-        self.smoothed_delta_x = 0
-        self.smoothed_delta_y = 0
+        # Target position (updated by hand tracking at 30 FPS)
+        self.target_delta_x = 0
+        self.target_delta_y = 0
         
-        # Smaller buffer for more responsive movement
-        self.movement_buffer = []
-        self.buffer_size = 3  # Reduced from 5 for more responsiveness
+        # Current interpolated position (updated by cursor thread at 120+ FPS)
+        self.current_delta_x = 0
+        self.current_delta_y = 0
         
-        # Smaller dead zone for more sensitive movement
-        self.dead_zone = 1.0  # Reduced from 2.0 for more sensitivity
+        # Velocity for smooth interpolation
+        self.velocity_x = 0
+        self.velocity_y = 0
         
-        # Velocity-based smoothing
-        self.last_movement_time = time.time()
-        self.movement_history = []  # Track recent movements for velocity calculation
+        # Dead zone for filtering hand tremors
+        self.dead_zone = 0.8  # Increased to prevent spasms from small hand movements
+        
+        # Thread control
+        self.cursor_thread = None
+        self.thread_running = False
+        self.thread_lock = threading.Lock()
+        
+        # Interpolation settings
+        self.cursor_update_rate = 120  # Hz - cursor updates per second
+        self.interpolation_speed = 0.15  # How fast to interpolate (0-1, lower = smoother, less overshoot)
         
     def _move_mouse_native(self, delta_x, delta_y):
-        """Use native macOS CGEvent with delta fields - same as working Krunker code"""
+        """Use native macOS CGEvent with delta fields"""
         try:
             from Quartz.CoreGraphics import (
                 CGEventCreate, CGEventGetLocation, CGEventCreateMouseEvent,
@@ -335,7 +344,7 @@ class KrunkerStyleMouseController:
             # Create mouse move event
             move_event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, (new_x, new_y), 0)
             
-            # CRITICAL FOR BROWSERS: Set the delta fields explicitly
+            # Set the delta fields explicitly
             CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaX, int(delta_x))
             CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaY, int(delta_y))
             
@@ -345,22 +354,82 @@ class KrunkerStyleMouseController:
         except Exception as e:
             print(f"Native mouse error: {e}")
     
+    def _cursor_update_thread(self):
+        """High-frequency cursor update thread (runs at 120+ FPS)"""
+        update_interval = 1.0 / self.cursor_update_rate
+        
+        while self.thread_running:
+            start_time = time.time()
+            
+            with self.thread_lock:
+                # Check if there's any target movement to apply
+                if abs(self.target_delta_x) > 0.1 or abs(self.target_delta_y) > 0.1:
+                    # Take a fraction of the target movement each frame for smoothness
+                    move_x = self.target_delta_x * self.interpolation_speed
+                    move_y = self.target_delta_y * self.interpolation_speed
+                    
+                    # Apply the movement
+                    if abs(move_x) >= 1.0 or abs(move_y) >= 1.0:
+                        self._move_mouse_native(int(move_x), int(move_y))
+                        
+                        # Subtract what we applied from the target (drain the queue)
+                        self.target_delta_x -= move_x
+                        self.target_delta_y -= move_y
+                    else:
+                        # Movement too small, clear it to prevent buildup
+                        self.target_delta_x = 0
+                        self.target_delta_y = 0
+            
+            # Sleep to maintain update rate
+            elapsed = time.time() - start_time
+            sleep_time = max(0, update_interval - elapsed)
+            time.sleep(sleep_time)
+    
+    def start_cursor_thread(self):
+        """Start the high-frequency cursor update thread"""
+        if not self.thread_running:
+            self.thread_running = True
+            self.cursor_thread = threading.Thread(target=self._cursor_update_thread, daemon=True)
+            self.cursor_thread.start()
+            print(f"🎯 Started cursor thread at {self.cursor_update_rate} Hz")
+    
+    def stop_cursor_thread(self):
+        """Stop the cursor update thread and clear all pending movements"""
+        # Immediately clear all pending movements
+        with self.thread_lock:
+            self.target_delta_x = 0
+            self.target_delta_y = 0
+            self.current_delta_x = 0
+            self.current_delta_y = 0
+        
+        if self.thread_running:
+            self.thread_running = False
+            if self.cursor_thread:
+                self.cursor_thread.join(timeout=0.5)
+            print("🎯 Stopped cursor thread")
+    
     def update(self, hand_landmarks, gun_active):
-        """Update mouse position using delta movement like Krunker code"""
+        """Update target position from hand tracking (30 FPS) - cursor thread handles smooth movement (120 FPS)"""
         if not gun_active or hand_landmarks is None:
+            # Stop cursor thread when gun inactive
+            self.stop_cursor_thread()
             self.last_x = None
             self.last_y = None
-            # Reset smoothing when gun becomes inactive
-            self.smoothed_delta_x = 0
-            self.smoothed_delta_y = 0
-            self.movement_buffer = []  # Reset movement buffer
-            self.movement_history = []  # Reset movement history
+            with self.thread_lock:
+                self.target_delta_x = 0
+                self.target_delta_y = 0
+                self.current_delta_x = 0
+                self.current_delta_y = 0
             return
+        
+        # Start cursor thread if not running
+        if not self.thread_running:
+            self.start_cursor_thread()
             
         try:
             index_tip = hand_landmarks.landmark[8]
             
-            # Convert to pixels for tracking (same as Krunker)
+            # Convert to pixels for tracking
             current_x = index_tip.x * 1920
             current_y = index_tip.y * 1080
             
@@ -369,39 +438,23 @@ class KrunkerStyleMouseController:
                 raw_delta_x = (current_x - self.last_x) * self.sensitivity
                 raw_delta_y = (current_y - self.last_y) * self.sensitivity
                 
-                # Apply dead zone filter to eliminate micro-movements and jitter
+                # Apply dead zone filter
                 movement_magnitude = (raw_delta_x**2 + raw_delta_y**2)**0.5
                 if movement_magnitude < self.dead_zone:
-                    # Movement too small - ignore it
                     raw_delta_x = 0
                     raw_delta_y = 0
                 
-                # Add to movement buffer for additional smoothing
-                self.movement_buffer.append((raw_delta_x, raw_delta_y))
-                if len(self.movement_buffer) > self.buffer_size:
-                    self.movement_buffer.pop(0)
-                
-                # Calculate buffer average for ultra-smooth movement
-                if len(self.movement_buffer) > 0:
-                    avg_delta_x = sum(d[0] for d in self.movement_buffer) / len(self.movement_buffer)
-                    avg_delta_y = sum(d[1] for d in self.movement_buffer) / len(self.movement_buffer)
-                else:
-                    avg_delta_x, avg_delta_y = raw_delta_x, raw_delta_y
-                
-                # Apply exponential smoothing to the averaged movement
-                self.smoothed_delta_x = (self.smoothing_factor * self.smoothed_delta_x + 
-                                       (1 - self.smoothing_factor) * avg_delta_x)
-                self.smoothed_delta_y = (self.smoothing_factor * self.smoothed_delta_y + 
-                                       (1 - self.smoothing_factor) * avg_delta_y)
-                
-                # Apply movement with lower threshold for more responsive movement
-                if abs(self.smoothed_delta_x) > 0.2 or abs(self.smoothed_delta_y) > 0.2:
-                    self._move_mouse_native(int(self.smoothed_delta_x), int(self.smoothed_delta_y))
+                # Update target for cursor thread to interpolate toward
+                with self.thread_lock:
+                    self.target_delta_x += raw_delta_x
+                    self.target_delta_y += raw_delta_y
                 
                 # Debug output
                 self.debug_counter += 1
                 if self.debug_counter % 30 == 0:
-                    print(f"📍 Mouse: raw=({int(raw_delta_x)},{int(raw_delta_y)}) smooth=({int(self.smoothed_delta_x)},{int(self.smoothed_delta_y)}) dead_zone={self.dead_zone}")
+                    print(f"📍 Cursor Thread: raw=({int(raw_delta_x)},{int(raw_delta_y)}) "
+                          f"target=({int(self.target_delta_x)},{int(self.target_delta_y)}) "
+                          f"current=({int(self.current_delta_x)},{int(self.current_delta_y)})")
             
             self.last_x = current_x
             self.last_y = current_y
@@ -614,11 +667,6 @@ class WASDController:
         
         self.current_keys = desired_keys
         
-        # Debug output for lean values
-        self.debug_counter += 1
-        if self.debug_counter % 60 == 0:  # Every 60 frames (about 6 seconds at 10 FPS)
-            print(f"📊 Lean Debug: left_right={left_right_lean:.1f}° (threshold={self.lean_threshold}°, strong={self.strong_lean_threshold}°)")
-        
         # Create key state dict for display
         key_states = {
             'w': 'w' in desired_keys,
@@ -668,7 +716,7 @@ class TongueController:
 class LeaningControlSystem:
     """Complete leaning-based CS:GO control system"""
     def __init__(self):
-        # Initialize MediaPipe
+        # Initialize MediaPipe (optimized for 30 FPS)
         self.hands = mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=2,
@@ -678,7 +726,7 @@ class LeaningControlSystem:
         
         self.pose = mp_pose.Pose(
             static_image_mode=False,
-            model_complexity=1,
+            model_complexity=0,  # Reduced from 1 for faster processing
             enable_segmentation=False,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
@@ -686,10 +734,13 @@ class LeaningControlSystem:
         
         self.face_mesh = mp_face_mesh.FaceMesh(
             max_num_faces=1,
-            refine_landmarks=True,
+            refine_landmarks=False,  # Disabled refinement for speed
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
+        
+        # Sensitivity control (0.1 to 1.0)
+        self.sensitivity = 0.5
         
         # Initialize controllers
         self.wasd_controller = WASDController()
@@ -698,6 +749,9 @@ class LeaningControlSystem:
         self.mouse_controller = SmoothMouseController()
         self.left_hand_controller = LeftHandGestureController()
         self.tongue_controller = TongueController()
+        
+        # Apply initial sensitivity to mouse controller
+        self.mouse_controller.krunker_controller.sensitivity = self.sensitivity * 2.5
         
         # Control state
         self.control_enabled = False
@@ -799,11 +853,15 @@ class LeaningControlSystem:
         frame_count = 0
         last_frame_time = time.time()
         
+        # Cache for pose and face results (updated less frequently)
+        pose_results = None
+        face_results = None
+        
         try:
             while True:
                 ret, frame = cap.read()
                 if not ret:
-                    time.sleep(0.1)
+                    time.sleep(0.001)  # Reduced sleep time
                     continue
                 
                 frame_count += 1
@@ -817,15 +875,15 @@ class LeaningControlSystem:
                 frame = cv2.flip(frame, 1)
                 h, w, _ = frame.shape
                 
-                # Process hands
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # Process hands EVERY frame (critical for smooth cursor)
                 hand_results = self.hands.process(rgb_frame)
                 
-                # Process pose
-                pose_results = self.pose.process(rgb_frame)
-                
-                # Process face
-                face_results = self.face_mesh.process(rgb_frame)
+                # Process pose and face every 3 frames (WASD/tongue don't need high FPS)
+                if frame_count % 3 == 0:
+                    pose_results = self.pose.process(rgb_frame)
+                    face_results = self.face_mesh.process(rgb_frame)
                 
                 # Initialize status variables
                 left_right_lean = 0
@@ -981,9 +1039,11 @@ class LeaningControlSystem:
                         print(f"\n{'='*50}")
                         print(f"Control {'ENABLED ✓' if self.control_enabled else 'DISABLED ✗'}")
                         print(f"{'='*50}\n")
-                    elif key == ord('+'):
-                        self.mouse_controller.krunker_controller.sensitivity += 0.2
-                        print(f"🎯 Crosshair sensitivity increased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
+                    elif key == ord('+') or key == ord('='):
+                        self.sensitivity = min(1.0, self.sensitivity + 0.1)
+                        # Apply sensitivity to mouse controller (finger gun cursor)
+                        self.mouse_controller.krunker_controller.sensitivity = self.sensitivity * 2.5
+                        print(f"🎯 Mouse Sensitivity: {self.sensitivity:.1f} (multiplier: {self.mouse_controller.krunker_controller.sensitivity:.2f})")
                     elif key == ord('-') or key == ord('_'):
                         self.mouse_controller.krunker_controller.sensitivity = max(0.1, self.mouse_controller.krunker_controller.sensitivity - 0.2)
                         print(f"🎯 Crosshair sensitivity decreased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
@@ -1016,7 +1076,6 @@ class LeaningControlSystem:
                     else:
                         # Handle UI overlay keyboard input
                         self.ui_overlay.handle_keyboard_input(key, self.mouse_controller)
-                        
                 except Exception as e:
                     print(f"Error handling keyboard input: {e}")
                     
@@ -1030,6 +1089,8 @@ class LeaningControlSystem:
                 print("Cleaning up resources...")
                 self.shooting_controller.force_release()
                 self.wasd_controller.release_all_keys()
+                # Stop cursor thread
+                self.mouse_controller.krunker_controller.stop_cursor_thread()
                 # Clean up mouse controller
                 self.mouse_controller.krunker_controller.last_x = None
                 self.mouse_controller.krunker_controller.last_y = None
@@ -1041,11 +1102,10 @@ class LeaningControlSystem:
                 print("Camera released")
                 print("Windows closed")
                 print("MediaPipe closed")
-                print("Trackpad touch ended")
+                print("Cursor thread stopped")
                 print("\n🎉 Hybrid control system finished!")
             except Exception as e:
                 print(f"Error during cleanup: {e}")
-    
     
 
 if __name__ == "__main__":
