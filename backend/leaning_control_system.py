@@ -16,6 +16,13 @@ import numpy as np
 import pyautogui
 import time
 from pynput.mouse import Controller as MouseController
+import Quartz
+from Quartz import (
+    CGEventCreateMouseEvent, CGEventPost, CGEventSourceCreate,
+    kCGEventMouseMoved, kCGEventLeftMouseDown, kCGEventLeftMouseUp,
+    kCGEventSourceStateHIDSystemState, kCGHIDEventTap,
+    CGEventSetIntegerValueField, kCGEventSourceStatePrivate
+)
 
 # PyAutoGUI Configuration for continuous key holding
 pyautogui.PAUSE = 0  # Remove pause for continuous operation
@@ -91,7 +98,7 @@ def are_bottom_fingers_curled(hand_landmarks):
 
 
 def detect_left_hand_gestures(hand_landmarks):
-    """Detect left hand gestures for crouch/jump"""
+    """Detect left hand gestures for crouch/jump/scope"""
     try:
         if not hasattr(hand_landmarks, 'landmark') or len(hand_landmarks.landmark) < 21:
             return "invalid", None
@@ -111,6 +118,8 @@ def detect_left_hand_gestures(hand_landmarks):
         
         if num_fingers_down == 1:  # One finger down
             return "one_down", "ctrl"  # Crouch
+        elif num_fingers_down == 2:  # Two fingers down
+            return "two_down", "right_mouse"  # Scope in
         elif num_fingers_down == 4:  # Four fingers down (thumb up)
             return "four_down", "space"  # Jump
         else:
@@ -277,64 +286,118 @@ class ThumbShootingController:
             pyautogui.mouseUp()
             self.is_pressed = False
 
-class SmoothMouseController:
-    """True 1:1 mouse controller - mouse moves exactly as much as finger moves"""
-    def __init__(self, sensitivity=1.0):
-        self.sensitivity = sensitivity  # 1:1 ratio
-        self.debug_counter = 0
-        self.mouse = MouseController()
+class KrunkerStyleMouseController:
+    """Mouse controller with smooth movement and adjustable sensitivity"""
+    def __init__(self):
+        self.sensitivity = 1.5  # Reduced for smoother movement
         self.last_x = None
         self.last_y = None
+        self.debug_counter = 0
         
+        # Smoothing variables
+        self.smoothing_factor = 0.7  # 0.0 = no smoothing, 1.0 = max smoothing
+        self.smoothed_delta_x = 0
+        self.smoothed_delta_y = 0
+        
+    def _move_mouse_native(self, delta_x, delta_y):
+        """Use native macOS CGEvent with delta fields - same as working Krunker code"""
+        try:
+            from Quartz.CoreGraphics import (
+                CGEventCreate, CGEventGetLocation, CGEventCreateMouseEvent,
+                CGEventSetIntegerValueField, CGEventPost, kCGHIDEventTap,
+                kCGEventMouseMoved, kCGMouseEventDeltaX, kCGMouseEventDeltaY
+            )
+            
+            # Get current mouse position
+            event = CGEventCreate(None)
+            current_pos = CGEventGetLocation(event)
+            
+            # Calculate new position
+            new_x = current_pos.x + delta_x
+            new_y = current_pos.y + delta_y
+            
+            # Create mouse move event
+            move_event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, (new_x, new_y), 0)
+            
+            # CRITICAL FOR BROWSERS: Set the delta fields explicitly
+            CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaX, int(delta_x))
+            CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaY, int(delta_y))
+            
+            # Post the event
+            CGEventPost(kCGHIDEventTap, move_event)
+            
+        except Exception as e:
+            print(f"Native mouse error: {e}")
+    
     def update(self, hand_landmarks, gun_active):
+        """Update mouse position using delta movement like Krunker code"""
         if not gun_active or hand_landmarks is None:
             self.last_x = None
             self.last_y = None
+            # Reset smoothing when gun becomes inactive
+            self.smoothed_delta_x = 0
+            self.smoothed_delta_y = 0
             return
             
         try:
-            # Get index finger tip position (normalized 0-1)
             index_tip = hand_landmarks.landmark[8]
             
-            # Convert to screen pixels (1:1 mapping)
-            current_x = index_tip.x * 1920  # Screen width
-            current_y = index_tip.y * 1080  # Screen height
+            # Convert to pixels for tracking (same as Krunker)
+            current_x = index_tip.x * 1920
+            current_y = index_tip.y * 1080
             
-            # Calculate exact pixel movement from last frame
             if self.last_x is not None and self.last_y is not None:
-                delta_x = (current_x - self.last_x) * self.sensitivity
-                delta_y = (current_y - self.last_y) * self.sensitivity
+                # Calculate raw delta movement
+                raw_delta_x = (current_x - self.last_x) * self.sensitivity
+                raw_delta_y = (current_y - self.last_y) * self.sensitivity
                 
-                # Send exact pixel movement (true 1:1)
-                self.mouse.move(int(delta_x), int(delta_y))
-            
-            # Debug output every 30 frames
-            self.debug_counter += 1
-            if self.debug_counter % 30 == 0:
-                print(f"1:1 Mouse delta: x={int(delta_x) if 'delta_x' in locals() else 0}, y={int(delta_y) if 'delta_y' in locals() else 0}")
+                # Apply smoothing using exponential moving average
+                self.smoothed_delta_x = (self.smoothing_factor * self.smoothed_delta_x + 
+                                       (1 - self.smoothing_factor) * raw_delta_x)
+                self.smoothed_delta_y = (self.smoothing_factor * self.smoothed_delta_y + 
+                                       (1 - self.smoothing_factor) * raw_delta_y)
+                
+                # Apply movement using smoothed values
+                if abs(self.smoothed_delta_x) > 0.3 or abs(self.smoothed_delta_y) > 0.3:
+                    self._move_mouse_native(int(self.smoothed_delta_x), int(self.smoothed_delta_y))
+                
+                # Debug output
+                self.debug_counter += 1
+                if self.debug_counter % 30 == 0:
+                    print(f"📍 Mouse: raw=({int(raw_delta_x)},{int(raw_delta_y)}) smooth=({int(self.smoothed_delta_x)},{int(self.smoothed_delta_y)})")
             
             self.last_x = current_x
             self.last_y = current_y
             
         except Exception as e:
             print(f"Mouse control error: {e}")
-            # Fallback to pyautogui
-            try:
-                if 'delta_x' in locals() and 'delta_y' in locals():
-                    pyautogui.moveRel(int(delta_x), int(delta_y))
-            except Exception as e2:
-                print(f"Fallback mouse control error: {e2}")
+
+class SmoothMouseController:
+    """Mouse controller using Krunker-style approach with smooth movement"""
+    def __init__(self, sensitivity=1.5):
+        self.krunker_controller = KrunkerStyleMouseController()
+        self.krunker_controller.sensitivity = sensitivity
+        print(f"🎮 Using smooth Krunker-style mouse controller with sensitivity: {sensitivity}")
+        
+    def update(self, hand_landmarks, gun_active):
+        """Use Krunker-style mouse controller for better browser compatibility"""
+        self.krunker_controller.update(hand_landmarks, gun_active)
 
 class LeftHandGestureController:
-    """Left hand gesture controller for crouch/jump (from dual_hand_tracking.py)"""
+    """Left hand gesture controller for crouch/jump/scope"""
     def __init__(self):
         self.last_gesture = None
         self.last_gesture_time = 0
         self.gesture_debounce = 0.1
+        self.right_mouse_pressed = False
         
     def update(self, hand_landmarks, control_enabled):
         try:
             if not control_enabled or hand_landmarks is None:
+                # Release right mouse if pressed
+                if self.right_mouse_pressed:
+                    pyautogui.mouseUp(button='right')
+                    self.right_mouse_pressed = False
                 return None, "Control Disabled"
             
             current_time = time.time()
@@ -343,7 +406,27 @@ class LeftHandGestureController:
             if gesture_name == "error" or gesture_name == "invalid":
                 return None, "Gesture detection error"
             
-            if action_key and gesture_name != self.last_gesture:
+            # Handle right mouse button (scope) differently - continuous press
+            if action_key == "right_mouse":
+                if gesture_name == "two_down":
+                    if not self.right_mouse_pressed:
+                        pyautogui.mouseDown(button='right')
+                        self.right_mouse_pressed = True
+                        self.last_gesture = gesture_name
+                        self.last_gesture_time = current_time
+                        return "right_mouse", "SCOPE IN - Two fingers down"
+                    else:
+                        return "right_mouse", "Holding scope"
+                else:
+                    # Release scope if not two fingers down
+                    if self.right_mouse_pressed:
+                        pyautogui.mouseUp(button='right')
+                        self.right_mouse_pressed = False
+                        self.last_gesture = None
+                    return None, "Scope released"
+            
+            # Handle other gestures (crouch/jump) - single press
+            elif action_key and gesture_name != self.last_gesture:
                 if current_time - self.last_gesture_time > self.gesture_debounce:
                     pyautogui.press(action_key)
                     self.last_gesture = gesture_name
@@ -528,7 +611,7 @@ class LeaningControlSystem:
         
         print("Hybrid Control System initialized!")
         print("Movement: Head pose for W/S + Body lean for A/D")
-        print("Right hand: Gun control + shooting")
+        print("Right hand: Gun control + shooting + Krunker-style mouse")
         print("Left hand: Crouch/jump")
         print("Tongue: Spray emote")
     
@@ -570,6 +653,8 @@ class LeaningControlSystem:
         print("=" * 50)
         print("Controls:")
         print("  'g' - Toggle control ON/OFF")
+        print("  '+' - Increase mouse sensitivity")
+        print("  '-' - Decrease mouse sensitivity")
         print("  'q' - Quit")
         print("\nMovement (WASD - Hybrid):")
         print("  - Head FORWARD → Press 'S' (move forward)")
@@ -583,6 +668,7 @@ class LeaningControlSystem:
         print("  - Index finger controls cursor")
         print("\nLeft Hand (Palm-Facing Controls):")
         print("  - One finger down = Press 'CTRL' (Crouch)")
+        print("  - Two fingers down = Right Mouse Button (Scope In)")
         print("  - Four fingers down = Press 'SPACE' (Jump)")
         print("  - Other positions = No action")
         print("\nTongue:")
@@ -757,6 +843,12 @@ class LeaningControlSystem:
                         print(f"\n{'='*50}")
                         print(f"Control {'ENABLED ✓' if self.control_enabled else 'DISABLED ✗'}")
                         print(f"{'='*50}\n")
+                    elif key == ord('+') or key == ord('='):
+                        self.mouse_controller.krunker_controller.sensitivity += 0.2
+                        print(f"📈 Sensitivity increased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
+                    elif key == ord('-') or key == ord('_'):
+                        self.mouse_controller.krunker_controller.sensitivity = max(0.1, self.mouse_controller.krunker_controller.sensitivity - 0.2)
+                        print(f"📉 Sensitivity decreased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
                 except Exception as e:
                     print(f"Error handling keyboard input: {e}")
                     
@@ -770,6 +862,13 @@ class LeaningControlSystem:
                 print("Cleaning up resources...")
                 self.shooting_controller.force_release()
                 self.wasd_controller.release_all_keys()
+                # Release right mouse button if pressed (scope)
+                if self.left_hand_controller.right_mouse_pressed:
+                    pyautogui.mouseUp(button='right')
+                    self.left_hand_controller.right_mouse_pressed = False
+                # Clean up mouse controller
+                self.mouse_controller.krunker_controller.last_x = None
+                self.mouse_controller.krunker_controller.last_y = None
                 cap.release()
                 cv2.destroyAllWindows()
                 self.hands.close()
@@ -778,6 +877,7 @@ class LeaningControlSystem:
                 print("Camera released")
                 print("Windows closed")
                 print("MediaPipe closed")
+                print("Trackpad touch ended")
                 print("\n🎉 Hybrid control system finished!")
             except Exception as e:
                 print(f"Error during cleanup: {e}")
