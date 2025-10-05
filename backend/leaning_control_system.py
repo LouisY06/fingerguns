@@ -7,7 +7,7 @@ Combines:
 
 Controls:
 - 't' to toggle control ON/OFF
-- ESC to quit
+- 'q' or ESC to quit
 """
 
 import cv2
@@ -22,6 +22,13 @@ from Quartz import (
     kCGEventSourceStateHIDSystemState, kCGHIDEventTap,
     CGEventSetIntegerValueField, kCGEventSourceStatePrivate
 )
+
+# Import UI modules
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from ui.overlay import MediaPipeOverlay
+from ui.config_manager import ConfigManager
 
 # PyAutoGUI Configuration for continuous key holding
 pyautogui.PAUSE = 0  # Remove pause for continuous operation
@@ -71,20 +78,10 @@ def calculate_head_pose(face_landmarks, w, h):
         chin_y = chin.y
         forehead_y = forehead.y
         
-        # Calculate pitch based on nose position relative to face height (better method)
-        face_height = chin_y - forehead_y
-        if face_height > 0:
-            nose_position = (nose_y - forehead_y) / face_height
-            pitch = (nose_position - 0.5) * 100  # Center around 0
-        else:
-            pitch = 0
-        
-        # Debug output
-        if not hasattr(calculate_head_pose, 'debug_counter'):
-            calculate_head_pose.debug_counter = 0
-        calculate_head_pose.debug_counter += 1
-        if calculate_head_pose.debug_counter % 30 == 0:
-            print(f"📊 Pitch: {pitch:.1f} (W threshold: {12}, S threshold: {-5})")
+        # Calculate pitch based on nose position relative to eye center
+        # Forward lean = negative pitch, backward lean = positive pitch
+        eye_center_y = (left_eye.y + right_eye.y) / 2
+        pitch = -(nose_y - eye_center_y) * 100  # Scale factor for sensitivity (inverted)
         
         return yaw, pitch
         
@@ -142,35 +139,28 @@ def are_bottom_fingers_curled(hand_landmarks):
 
 
 def detect_left_hand_gestures(hand_landmarks):
-    """Detect left hand gestures for jump/knife/interact"""
+    """Detect left hand gestures for crouch/jump"""
     try:
         if not hasattr(hand_landmarks, 'landmark') or len(hand_landmarks.landmark) < 21:
             return "invalid", None
             
         landmarks = hand_landmarks.landmark
         
-        # Check individual finger states - check if fingers are UP (extended)
-        thumb_up = is_finger_extended(landmarks, 4, 3, 2)
-        index_up = is_finger_extended(landmarks, 8, 6, 5)
-        middle_up = is_finger_extended(landmarks, 12, 10, 9)
-        ring_up = is_finger_extended(landmarks, 16, 14, 13)
-        pinky_up = is_finger_extended(landmarks, 20, 18, 17)
+        # Check individual finger states - for palm-facing camera, we check if fingers are DOWN
+        thumb_down = not is_finger_extended(landmarks, 4, 3, 2)
+        index_down = not is_finger_extended(landmarks, 8, 6, 5)
+        middle_down = not is_finger_extended(landmarks, 12, 10, 9)
+        ring_down = not is_finger_extended(landmarks, 16, 14, 13)
+        pinky_down = not is_finger_extended(landmarks, 20, 18, 17)
         
-        # Gesture detection based on fingers UP
-        # Priority order: most specific gestures first
+        # Gesture detection based on fingers DOWN
+        fingers_down = [thumb_down, index_down, middle_down, ring_down, pinky_down]
+        num_fingers_down = sum(fingers_down)
         
-        # Pinky + Index + Thumb up (middle and ring down) → Knife (Q)
-        if pinky_up and index_up and thumb_up and not middle_up and not ring_up:
-            return "knife", "q"
-        
-        # Pinky + Thumb up (index, middle, ring down) → Interact (E)
-        elif pinky_up and thumb_up and not index_up and not middle_up and not ring_up:
-            return "interact", "e"
-        
-        # Only Index up → Jump (Space)
-        elif index_up and not thumb_up and not middle_up and not ring_up and not pinky_up:
-            return "jump", "space"
-        
+        if num_fingers_down == 1:  # One finger down
+            return "one_down", "space"  # Jump
+        elif num_fingers_down == 4:  # Four fingers down (thumb up)
+            return "four_down", "ctrl"  # Crouch
         else:
             return "unknown", None
             
@@ -178,6 +168,78 @@ def detect_left_hand_gestures(hand_landmarks):
         print(f"Error in detect_left_hand_gestures: {e}")
         return "error", None
 
+def calculate_head_pose(face_landmarks, frame_width, frame_height):
+    """Calculate head pose (yaw and pitch for W/S movement)"""
+    try:
+        nose_tip = face_landmarks.landmark[1]
+        left_eye = face_landmarks.landmark[33]
+        right_eye = face_landmarks.landmark[263]
+        chin = face_landmarks.landmark[152]
+        forehead = face_landmarks.landmark[10]
+        
+        # Yaw (left/right) - not used for A/D anymore
+        eye_center_x = (left_eye.x + right_eye.x) / 2
+        nose_x = nose_tip.x
+        yaw = (nose_x - eye_center_x) * 100
+        
+        # Pitch (forward/backward) - used for W/S
+        nose_y = nose_tip.y
+        chin_y = chin.y
+        forehead_y = forehead.y
+        face_height = chin_y - forehead_y
+        nose_position = (nose_y - forehead_y) / face_height if face_height > 0 else 0.5
+        pitch = (nose_position - 0.5) * 100
+        
+        return yaw, pitch
+        
+    except Exception as e:
+        print(f"Error calculating head pose: {e}")
+        return 0, 0
+
+def calculate_torso_flexion(pose_landmarks, frame_width, frame_height):
+    """Calculate torso flexion for W/S movement using shoulder-hip vector"""
+    try:
+        # Get key landmarks
+        left_shoulder = pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER]
+        right_shoulder = pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+        left_hip = pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP]
+        right_hip = pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_HIP]
+        nose = pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
+        
+        # Calculate midpoints
+        mid_shoulder = np.array([(left_shoulder.x + right_shoulder.x) / 2, 
+                                (left_shoulder.y + right_shoulder.y) / 2])
+        mid_hip = np.array([(left_hip.x + right_hip.x) / 2, 
+                           (left_hip.y + right_hip.y) / 2])
+        nose_point = np.array([nose.x, nose.y])
+        
+        # Build torso vector (shoulder to hip)
+        torso_vector = mid_hip - mid_shoulder
+        
+        # Build head vector (shoulder to nose)
+        head_vector = nose_point - mid_shoulder
+        
+        # Calculate angle between torso and head vectors
+        # Normalize vectors
+        torso_norm = np.linalg.norm(torso_vector)
+        head_norm = np.linalg.norm(head_vector)
+        
+        if torso_norm > 0 and head_norm > 0:
+            # Calculate angle in degrees
+            cos_angle = np.dot(torso_vector, head_vector) / (torso_norm * head_norm)
+            cos_angle = np.clip(cos_angle, -1.0, 1.0)
+            angle = np.degrees(np.arccos(cos_angle))
+            
+            # Convert to flexion angle (90° = neutral, <90° = forward lean, >90° = backward lean)
+            flexion_angle = 90 - angle
+            
+            return flexion_angle
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error calculating torso flexion: {e}")
+        return 0
 
 def calculate_lean_pose(pose_landmarks, frame_width, frame_height):
     """Calculate body lean for A/D movement based on shoulder and hip positions"""
@@ -330,6 +392,9 @@ class KrunkerStyleMouseController:
         
         # Dead zone for filtering hand tremors
         self.dead_zone = 0.8  # Increased to prevent spasms from small hand movements
+        
+        # Smoothing factor for additional filtering
+        self.smoothing_factor = 0.7  # Exponential smoothing (0-1, higher = more smoothing)
         
         # Thread control
         self.cursor_thread = None
@@ -491,6 +556,14 @@ class KrunkerStyleMouseController:
                     raw_delta_x = 0
                     raw_delta_y = 0
                 
+                # Apply exponential smoothing to reduce jitter
+                if self.smoothing_factor > 0:
+                    # Exponential smoothing: smoothed = α * new + (1-α) * previous
+                    self.velocity_x = self.smoothing_factor * raw_delta_x + (1 - self.smoothing_factor) * self.velocity_x
+                    self.velocity_y = self.smoothing_factor * raw_delta_y + (1 - self.smoothing_factor) * self.velocity_y
+                    raw_delta_x = self.velocity_x
+                    raw_delta_y = self.velocity_y
+                
                 # Update target for cursor thread to interpolate toward
                 with self.thread_lock:
                     self.target_delta_x += raw_delta_x
@@ -562,13 +635,19 @@ class LeftHandGestureController:
             return None, "Error"
 
 class WASDController:
-    """Hybrid controller: Head tilt for A/D, head pose for W/S"""
-    def __init__(self, lean_threshold=3, pitch_threshold=5, pitch_threshold_back=12, hysteresis=0.7):
+    """Hybrid controller: Head tilt for A/D, torso flexion for W/S"""
+    def __init__(self, lean_threshold=3, flexion_threshold=12, flexion_threshold_back=15, hysteresis=0.7):
         self.lean_threshold = lean_threshold  # For A/D (left/right lean)
-        self.pitch_threshold = pitch_threshold  # For W (head forward)
-        self.pitch_threshold_back = pitch_threshold_back  # For S (head backward)
+        self.flexion_threshold = flexion_threshold  # For W (forward flexion)
+        self.flexion_threshold_back = flexion_threshold_back  # For S (backward flexion)
         self.hysteresis = hysteresis  # Multiplier for release threshold
         self.current_keys = set()  # Currently pressed keys
+        
+        # Torso flexion calibration
+        self.neutral_flexion = None  # Will be calibrated after 2-3 seconds
+        self.calibration_frames = []
+        self.calibration_complete = False
+        self.calibration_timer = 0
         
         # Gradual movement for A/D (left/right lean)
         self.lean_press_timer = 0
@@ -580,9 +659,9 @@ class WASDController:
         self.lean_key_press_start = {'a': 0, 'd': 0}  # Track when key was pressed
         self.debug_counter = 0
         
-    def update(self, head_yaw, head_pitch, control_enabled):
+    def update(self, head_yaw, torso_flexion, control_enabled):
         """
-        Update WASD keys based on head tilt (A/D) and head pose (W/S)
+        Update WASD keys based on head tilt (A/D) and torso flexion (W/S)
         Returns: (active_keys, key_states)
         """
         if not control_enabled:
@@ -597,13 +676,28 @@ class WASDController:
                 self.lean_key_state['d'] = False
             return set(), {'w': False, 'a': False, 's': False, 'd': False}
         
+        # Calibrate neutral flexion position
+        if not self.calibration_complete:
+            self.calibration_timer += 1
+            if torso_flexion is not None:
+                self.calibration_frames.append(torso_flexion)
+            
+            # Calibrate after 90 frames (3 seconds at 30 FPS)
+            if self.calibration_timer >= 90 and len(self.calibration_frames) > 0:
+                self.neutral_flexion = np.mean(self.calibration_frames)
+                self.calibration_complete = True
+                print(f"🎯 Torso flexion calibrated: {self.neutral_flexion:.1f}° (neutral)")
+                return set(), {'w': False, 'a': False, 's': False, 'd': False}
+            else:
+                return set(), {'w': False, 'a': False, 's': False, 'd': False}
+        
         desired_keys = set()
         current_time = time.time()
         
         # Calculate release thresholds (closer to center)
         lean_release = self.lean_threshold * self.hysteresis
-        pitch_release = self.pitch_threshold * self.hysteresis
-        pitch_release_back = self.pitch_threshold_back * self.hysteresis
+        flexion_release = self.flexion_threshold * self.hysteresis
+        flexion_release_back = self.flexion_threshold_back * self.hysteresis
         
         # Release small lean keys if user returns to center
         if head_yaw >= -self.lean_threshold and head_yaw <= self.lean_threshold:
@@ -682,24 +776,35 @@ class WASDController:
                         self.last_lean_press_time['d'] = current_time
                         print(f"🔄 Small lean RIGHT: {head_yaw:.1f}° - Released 'D', waiting 75ms")
             
-        # Forward/Backward (W/S) - using head pose (switched W and S)
-        if 'w' in self.current_keys:
-            # Already pressing W
-            if head_pitch < pitch_release_back:
-                pass  # Release W
-            else:
-                desired_keys.add('w')  # Keep pressing W
-        elif head_pitch > self.pitch_threshold_back:
-            desired_keys.add('w')  # Start pressing W (head backward)
+        # Forward/Backward (W/S) - using torso flexion
+        if torso_flexion is not None and self.neutral_flexion is not None:
+            # Calculate flexion relative to neutral position
+            flexion_delta = torso_flexion - self.neutral_flexion
             
-        if 's' in self.current_keys:
-            # Already pressing S
-            if head_pitch > -pitch_release:
-                pass  # Release S
-            else:
-                desired_keys.add('s')  # Keep pressing S
-        elif head_pitch < -self.pitch_threshold:
-            desired_keys.add('s')  # Start pressing S (head forward)
+            # Debug output
+            self.debug_counter += 1
+            if self.debug_counter % 30 == 0:
+                print(f"🎯 Torso Flexion: {torso_flexion:.1f}° (delta: {flexion_delta:.1f}°, W threshold: {self.flexion_threshold}, S threshold: {self.flexion_threshold_back})")
+            
+            if 'w' in self.current_keys:
+                # Already pressing W
+                if flexion_delta < flexion_release:
+                    pass  # Release W
+                else:
+                    desired_keys.add('w')  # Keep pressing W
+            elif flexion_delta > self.flexion_threshold:
+                desired_keys.add('w')  # Start pressing W (forward flexion)
+                print(f"🎯 Forward Flexion: {flexion_delta:.1f}° - Pressing 'W'")
+                
+            if 's' in self.current_keys:
+                # Already pressing S
+                if flexion_delta > -flexion_release_back:
+                    pass  # Release S
+                else:
+                    desired_keys.add('s')  # Keep pressing S
+            elif flexion_delta < -self.flexion_threshold_back:
+                desired_keys.add('s')  # Start pressing S (backward flexion)
+                print(f"🎯 Backward Flexion: {flexion_delta:.1f}° - Pressing 'S'")
         
         # Release keys that should no longer be pressed
         keys_to_release = self.current_keys - desired_keys
@@ -808,11 +913,19 @@ class LeaningControlSystem:
         # Control state
         self.control_enabled = False
         
+        # Initialize UI components
+        self.config_manager = ConfigManager()
+        self.ui_overlay = MediaPipeOverlay(self.config_manager)
+        
         print("Hybrid Control System initialized!")
-        print("Movement: Head tilt for A/D + Head pose for W/S")
+        print("Movement: Head tilt for A/D + Torso flexion for W/S")
         print("Right hand: Gun control + shooting + Krunker-style mouse")
         print("Left hand: Crouch/jump")
         print("Tongue: Spray emote")
+        print("Press 'C' to toggle configuration panel")
+        print("Press 'H' to toggle help panel")
+        print("Press 'M' to toggle gesture mapping")
+        print("Use arrow keys to navigate UI")
     
     
     def identify_hands(self, hand_landmarks_list):
@@ -853,12 +966,26 @@ class LeaningControlSystem:
         print("=" * 50)
         print("Controls:")
         print("  'g' - Toggle control ON/OFF")
-        print("  '+' - Increase sensitivity")
-        print("  '-' - Decrease sensitivity")
-        print("  'ESC' - Quit")
+        print("  'c' - Toggle configuration panel")
+        print("  'h' - Toggle help panel")
+        print("  'm' - Toggle gesture mapping")
+        print("  'tab' - Switch UI panels")
+        print("  'arrow keys' - Navigate UI / Adjust config values")
+        print("  'enter' - Select/confirm")
+        print("  '1/2' - Adjust config values (legacy)")
+        print("  '3/4' - Fine adjust config values (legacy)")
+        print("  '+' - Increase crosshair sensitivity (large)")
+        print("  '-' - Decrease crosshair sensitivity (large)")
+        print("  '=' - Increase crosshair sensitivity (small)")
+        print("  '0' - Decrease crosshair sensitivity (small)")
+        print("  '9' - Increase smoothing")
+        print("  '8' - Decrease smoothing")
+        print("  '7' - Increase dead zone")
+        print("  '6' - Decrease dead zone")
+        print("  'q' - Quit")
         print("\nMovement (WASD - Hybrid):")
-        print("  - Head FORWARD → Press 'S' (move forward)")
-        print("  - Head BACKWARD → Press 'W' (move backward)")
+        print("  - Torso FORWARD lean → Press 'W' (move forward)")
+        print("  - Torso BACKWARD lean → Press 'S' (move backward)")
         print("  - Body Lean LEFT (small) → Hold 'A' for 1s, wait 75ms, repeat")
         print("  - Body Lean LEFT (strong) → Hold 'A' down continuously")
         print("  - Body Lean RIGHT (small) → Hold 'D' for 1s, wait 75ms, repeat")
@@ -868,10 +995,9 @@ class LeaningControlSystem:
         print("  - Thumb UP = ready to shoot")
         print("  - Thumb DOWN = START FIRING")
         print("  - Index finger controls cursor")
-        print("\nLeft Hand (Gesture Controls):")
-        print("  - Index finger up (only) = Press 'SPACE' (Jump)")
-        print("  - Pinky + Index + Thumb up = Press 'Q' (Knife)")
-        print("  - Pinky + Thumb up = Press 'E' (Interact)")
+        print("\nLeft Hand (Palm-Facing Controls):")
+        print("  - One finger down = Press 'SPACE' (Jump)")
+        print("  - Four fingers down = Press 'CTRL' (Crouch)")
         print("  - Other positions = No action")
         print("\nTongue:")
         print("  - Stick out tongue = Press 'T' (Spray emote)")
@@ -915,9 +1041,16 @@ class LeaningControlSystem:
                 if frame_count % 3 == 0:
                     pose_results = self.pose.process(rgb_frame)
                     face_results = self.face_mesh.process(rgb_frame)
+                    
+                    # Debug pose detection
+                    if pose_results and pose_results.pose_landmarks:
+                        print(f"🎯 Pose detected - Frame {frame_count}")
+                    else:
+                        print(f"❌ No pose detected - Frame {frame_count}")
                 
                 # Initialize status variables
                 head_yaw, head_pitch = 0, 0
+                torso_flexion = None
                 active_wasd_keys = set()
                 wasd_states = {'w': False, 'a': False, 's': False, 'd': False}
                 
@@ -930,6 +1063,7 @@ class LeaningControlSystem:
                 tongue_status = "No face"
                 
                 # Process pose for body leaning (A/D only)
+                left_right_lean = 0  # Default value
                 if pose_results and pose_results.pose_landmarks:
                     try:
                         # Draw pose landmarks
@@ -939,7 +1073,11 @@ class LeaningControlSystem:
                             mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2)
                         )
                         
-                        # No body lean needed - using head tilt for A/D
+                        # Calculate body lean for UI display
+                        left_right_lean = calculate_lean_pose(pose_results.pose_landmarks, frame.shape[1], frame.shape[0])
+                        
+                        # Calculate torso flexion for W/S movement
+                        torso_flexion = calculate_torso_flexion(pose_results.pose_landmarks, frame.shape[1], frame.shape[0])
                         
                     except Exception as e:
                         print(f"Error processing pose: {e}")
@@ -957,6 +1095,7 @@ class LeaningControlSystem:
                         
                         # Head pose for W/S movement
                         head_yaw, head_pitch = calculate_head_pose(face_landmarks, w, h)
+                        print(f"🎯 Face detected - Pitch: {head_pitch:.1f}°, Yaw: {head_yaw:.1f}°")
                         
                         # Tongue detection for spray emote
                         tongue_out, tongue_status = self.tongue_controller.update(
@@ -966,9 +1105,9 @@ class LeaningControlSystem:
                     except Exception as e:
                         print(f"Error processing face: {e}")
                 
-                # Update WASD controller with head tilt (A/D) and head pose (W/S)
+                # Update WASD controller with head tilt (A/D) and torso flexion (W/S)
                 active_wasd_keys, wasd_states = self.wasd_controller.update(
-                    head_yaw, head_pitch, self.control_enabled
+                    head_yaw, torso_flexion, self.control_enabled
                 )
                 
                 # Debug output for hybrid detection
@@ -1029,25 +1168,43 @@ class LeaningControlSystem:
                     except Exception as e:
                         print(f"Error processing hands: {e}")
                 
-                # Display status overlay
-                self.display_status(frame, wasd_states, gun_active, shoot_status, 
-                                  left_status, tongue_status, head_yaw, head_pitch, tongue_out)
+                # Prepare results for UI overlay
+                results = {
+                    'left_hand_gesture': [left_status, None],
+                    'right_hand_gesture': ["gun" if gun_active else None, "thumb_down" if is_shooting else "thumb_up" if gun_active else None],
+                    'head_pose': {'pitch': head_pitch, 'yaw': head_yaw},
+                    'body_lean': {'lean': left_right_lean},
+                    'tongue_out': tongue_out
+                }
+                
+                # Update overlay with current control state
+                self.ui_overlay.control_enabled = self.control_enabled
+                
+                # Draw gesture overlay
+                frame = self.ui_overlay.draw_gesture_overlay(frame, results)
+                
+                # Draw UI panels
+                self.ui_overlay.draw_all_panels(frame)
                 
                 # Show frame
                 cv2.imshow('Hybrid Control System', frame)
-                # Try to bring window to front
-                cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 1)
-                cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 0)
                 
                 # Check if window was closed (red X button)
                 if cv2.getWindowProperty('Hybrid Control System', cv2.WND_PROP_VISIBLE) < 1:
                     print("Window closed - exiting...")
                     break
                 
-                # Handle keyboard input (minimal wait for maximum FPS)
+                # Handle keyboard input
                 try:
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == 27:  # ESC to quit
+                    key = cv2.waitKey(30)
+                    if key == -1:  # No key pressed
+                        continue
+                    
+                    # Debug: Print key codes to understand what's being detected
+                    if self.ui_overlay.show_config_panel:
+                        print(f"🔍 Key pressed: {key} (0x{key:02X})")
+                    
+                    if key == ord('q') or key == 27:  # 'q' or ESC to quit
                         print("Quit key pressed - exiting...")
                         break
                     elif key == ord('g'):
@@ -1064,10 +1221,37 @@ class LeaningControlSystem:
                         self.mouse_controller.krunker_controller.sensitivity = self.sensitivity * 2.5
                         print(f"🎯 Mouse Sensitivity: {self.sensitivity:.1f} (multiplier: {self.mouse_controller.krunker_controller.sensitivity:.2f})")
                     elif key == ord('-') or key == ord('_'):
-                        self.sensitivity = max(0.1, self.sensitivity - 0.1)
-                        # Apply sensitivity to mouse controller (finger gun cursor)
-                        self.mouse_controller.krunker_controller.sensitivity = self.sensitivity * 2.5
-                        print(f"🎯 Mouse Sensitivity: {self.sensitivity:.1f} (multiplier: {self.mouse_controller.krunker_controller.sensitivity:.2f})")
+                        self.mouse_controller.krunker_controller.sensitivity = max(0.1, self.mouse_controller.krunker_controller.sensitivity - 0.2)
+                        print(f"🎯 Crosshair sensitivity decreased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
+                    elif key == ord('='):
+                        self.mouse_controller.krunker_controller.sensitivity += 0.05
+                        print(f"🎯 Crosshair sensitivity fine-tuned to {self.mouse_controller.krunker_controller.sensitivity:.2f}")
+                    elif key == ord('0'):
+                        self.mouse_controller.krunker_controller.sensitivity = max(0.1, self.mouse_controller.krunker_controller.sensitivity - 0.05)
+                        print(f"🎯 Crosshair sensitivity fine-tuned to {self.mouse_controller.krunker_controller.sensitivity:.2f}")
+                    elif key == ord('9'):
+                        self.mouse_controller.krunker_controller.smoothing_factor = min(0.95, self.mouse_controller.krunker_controller.smoothing_factor + 0.05)
+                        print(f"🌊 Smoothing increased to {self.mouse_controller.krunker_controller.smoothing_factor:.2f}")
+                    elif key == ord('8'):
+                        self.mouse_controller.krunker_controller.smoothing_factor = max(0.3, self.mouse_controller.krunker_controller.smoothing_factor - 0.05)
+                        print(f"🌊 Smoothing decreased to {self.mouse_controller.krunker_controller.smoothing_factor:.2f}")
+                    elif key == ord('7'):
+                        self.mouse_controller.krunker_controller.dead_zone = min(10.0, self.mouse_controller.krunker_controller.dead_zone + 0.5)
+                        print(f"🚫 Dead zone increased to {self.mouse_controller.krunker_controller.dead_zone:.1f}")
+                    elif key == ord('6'):
+                        self.mouse_controller.krunker_controller.dead_zone = max(0.5, self.mouse_controller.krunker_controller.dead_zone - 0.5)
+                        print(f"🚫 Dead zone decreased to {self.mouse_controller.krunker_controller.dead_zone:.1f}")
+                    elif key == ord('1'):  # Increase selected config value
+                        self.ui_overlay.adjust_config_value(0.1, self.mouse_controller)
+                    elif key == ord('2'):  # Decrease selected config value
+                        self.ui_overlay.adjust_config_value(-0.1, self.mouse_controller)
+                    elif key == ord('3'):  # Fine increase
+                        self.ui_overlay.adjust_config_value(0.01, self.mouse_controller)
+                    elif key == ord('4'):  # Fine decrease
+                        self.ui_overlay.adjust_config_value(-0.01, self.mouse_controller)
+                    else:
+                        # Handle UI overlay keyboard input
+                        self.ui_overlay.handle_keyboard_input(key, self.mouse_controller)
                 except Exception as e:
                     print(f"Error handling keyboard input: {e}")
                     
@@ -1099,86 +1283,6 @@ class LeaningControlSystem:
             except Exception as e:
                 print(f"Error during cleanup: {e}")
     
-    def display_status(self, frame, wasd_states, gun_active, shoot_status, 
-                      left_status, tongue_status, head_yaw, head_pitch, tongue_out):
-        """Display clean, organized status overlay"""
-        h, w = frame.shape[:2]
-        
-        # Create semi-transparent background panels
-        self._draw_panel(frame, 10, 10, 300, 120, "CONTROL STATUS", alpha=0.8)
-        self._draw_panel(frame, w - 200, 10, 180, 100, "MOVEMENT", alpha=0.8)
-        self._draw_panel(frame, 10, h - 150, 350, 130, "GESTURE STATUS", alpha=0.8)
-        
-        # Main control status (top left)
-        control_status = "CONTROL: ON ✓" if self.control_enabled else "CONTROL: OFF ✗"
-        control_color = (0, 255, 0) if self.control_enabled else (0, 0, 255)
-        cv2.putText(frame, control_status, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, control_color, 2)
-        
-        # Sensitivity display
-        cv2.putText(frame, f"Mouse Sens: {self.sensitivity:.1f}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # Toggle instruction
-        cv2.putText(frame, "Press 'G' to toggle (click window first!)", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-        cv2.putText(frame, "Press 'ESC' to quit | +/- to change sensitivity", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-        
-        # Movement overlay (top right) - Clean WASD display
-        self._draw_wasd_overlay(frame, w - 190, 30, wasd_states)
-        
-        # Gesture status panel (bottom left) - Organized layout
-        y_start = h - 130
-        
-        # Right hand (gun)
-        gun_color = (0, 255, 0) if gun_active else (128, 128, 128)
-        cv2.putText(frame, f"🔫 Gun: {'ACTIVE' if gun_active else 'INACTIVE'}", (20, y_start + 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, gun_color, 2)
-        if gun_active:
-            cv2.putText(frame, f"   Shoot: {shoot_status}", (20, y_start + 45), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # Left hand
-        cv2.putText(frame, f"✋ Left: {left_status}", (20, y_start + 70), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        
-        # Tongue
-        tongue_color = (0, 255, 0) if tongue_out else (128, 128, 128)
-        cv2.putText(frame, f"👅 Tongue: {tongue_status}", (20, y_start + 95), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, tongue_color, 2)
-    
-    def _draw_panel(self, frame, x, y, width, height, title, alpha=0.7):
-        """Draw a semi-transparent panel with title"""
-        # Create overlay
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (x, y), (x + width, y + height), (0, 0, 0), -1)
-        cv2.rectangle(overlay, (x, y), (x + width, y + height), (255, 255, 255), 2)
-        
-        # Blend overlay
-        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
-        
-        # Add title
-        cv2.putText(frame, title, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    
-    def _draw_wasd_overlay(self, frame, x, y, wasd_states):
-        """Draw clean WASD movement indicator"""
-        # Draw key indicators in a clean layout
-        key_positions = {
-            'w': (x + 80, y + 25),
-            'a': (x + 40, y + 50),
-            's': (x + 80, y + 50),
-            'd': (x + 120, y + 50)
-        }
-        
-        # Draw active keys
-        active_keys = [key for key, active in wasd_states.items() if active]
-        if active_keys:
-            cv2.putText(frame, f"Moving: {' '.join([k.upper() for k in active_keys])}", 
-                       (x + 10, y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-        
-        # Draw key circles
-        for key, (kx, ky) in key_positions.items():
-            color = (0, 255, 0) if wasd_states[key] else (60, 60, 60)
-            cv2.circle(frame, (kx, ky), 12, color, -1)
-            cv2.circle(frame, (kx, ky), 12, (255, 255, 255), 1)
-            cv2.putText(frame, key.upper(), (kx - 6, ky + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
 
 if __name__ == "__main__":
     system = LeaningControlSystem()

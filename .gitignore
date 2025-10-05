@@ -48,3 +48,11 @@ backend/audio_cache/
 # OS
 .DS_Store
 Thumbs.db
+venv/
+__pycache__/
+*.pyc
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.tflite
