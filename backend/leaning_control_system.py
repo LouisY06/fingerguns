@@ -81,8 +81,9 @@ def calculate_head_pose(face_landmarks, w, h):
         forehead_y = forehead.y
         
         # Calculate pitch based on nose position relative to eye center
+        # Forward lean = negative pitch, backward lean = positive pitch
         eye_center_y = (left_eye.y + right_eye.y) / 2
-        pitch = (nose_y - eye_center_y) * 100  # Scale factor for sensitivity
+        pitch = -(nose_y - eye_center_y) * 100  # Scale factor for sensitivity (inverted)
         
         return yaw, pitch
         
@@ -159,9 +160,9 @@ def detect_left_hand_gestures(hand_landmarks):
         num_fingers_down = sum(fingers_down)
         
         if num_fingers_down == 1:  # One finger down
-            return "one_down", "ctrl"  # Crouch
+            return "one_down", "space"  # Jump
         elif num_fingers_down == 4:  # Four fingers down (thumb up)
-            return "four_down", "space"  # Jump
+            return "four_down", "ctrl"  # Crouch
         else:
             return "unknown", None
             
@@ -196,6 +197,51 @@ def calculate_head_pose(face_landmarks, frame_width, frame_height):
     except Exception as e:
         print(f"Error calculating head pose: {e}")
         return 0, 0
+
+def calculate_torso_flexion(pose_landmarks, frame_width, frame_height):
+    """Calculate torso flexion for W/S movement using shoulder-hip vector"""
+    try:
+        # Get key landmarks
+        left_shoulder = pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER]
+        right_shoulder = pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+        left_hip = pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP]
+        right_hip = pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_HIP]
+        nose = pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
+        
+        # Calculate midpoints
+        mid_shoulder = np.array([(left_shoulder.x + right_shoulder.x) / 2, 
+                                (left_shoulder.y + right_shoulder.y) / 2])
+        mid_hip = np.array([(left_hip.x + right_hip.x) / 2, 
+                           (left_hip.y + right_hip.y) / 2])
+        nose_point = np.array([nose.x, nose.y])
+        
+        # Build torso vector (shoulder to hip)
+        torso_vector = mid_hip - mid_shoulder
+        
+        # Build head vector (shoulder to nose)
+        head_vector = nose_point - mid_shoulder
+        
+        # Calculate angle between torso and head vectors
+        # Normalize vectors
+        torso_norm = np.linalg.norm(torso_vector)
+        head_norm = np.linalg.norm(head_vector)
+        
+        if torso_norm > 0 and head_norm > 0:
+            # Calculate angle in degrees
+            cos_angle = np.dot(torso_vector, head_vector) / (torso_norm * head_norm)
+            cos_angle = np.clip(cos_angle, -1.0, 1.0)
+            angle = np.degrees(np.arccos(cos_angle))
+            
+            # Convert to flexion angle (90° = neutral, <90° = forward lean, >90° = backward lean)
+            flexion_angle = 90 - angle
+            
+            return flexion_angle
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error calculating torso flexion: {e}")
+        return 0
 
 def calculate_lean_pose(pose_landmarks, frame_width, frame_height):
     """Calculate body lean for A/D movement based on shoulder and hip positions"""
@@ -554,13 +600,19 @@ class LeftHandGestureController:
             return None, "Error"
 
 class WASDController:
-    """Hybrid controller: Head tilt for A/D, head pose for W/S"""
-    def __init__(self, lean_threshold=3, pitch_threshold=8, pitch_threshold_back=12, hysteresis=0.7):
+    """Hybrid controller: Head tilt for A/D, torso flexion for W/S"""
+    def __init__(self, lean_threshold=3, flexion_threshold=12, flexion_threshold_back=15, hysteresis=0.7):
         self.lean_threshold = lean_threshold  # For A/D (left/right lean)
-        self.pitch_threshold = pitch_threshold  # For W (head forward)
-        self.pitch_threshold_back = pitch_threshold_back  # For S (head backward)
+        self.flexion_threshold = flexion_threshold  # For W (forward flexion)
+        self.flexion_threshold_back = flexion_threshold_back  # For S (backward flexion)
         self.hysteresis = hysteresis  # Multiplier for release threshold
         self.current_keys = set()  # Currently pressed keys
+        
+        # Torso flexion calibration
+        self.neutral_flexion = None  # Will be calibrated after 2-3 seconds
+        self.calibration_frames = []
+        self.calibration_complete = False
+        self.calibration_timer = 0
         
         # Gradual movement for A/D (left/right lean)
         self.lean_press_timer = 0
@@ -572,9 +624,9 @@ class WASDController:
         self.lean_key_press_start = {'a': 0, 'd': 0}  # Track when key was pressed
         self.debug_counter = 0
         
-    def update(self, head_yaw, head_pitch, control_enabled):
+    def update(self, head_yaw, torso_flexion, control_enabled):
         """
-        Update WASD keys based on head tilt (A/D) and head pose (W/S)
+        Update WASD keys based on head tilt (A/D) and torso flexion (W/S)
         Returns: (active_keys, key_states)
         """
         if not control_enabled:
@@ -589,13 +641,28 @@ class WASDController:
                 self.lean_key_state['d'] = False
             return set(), {'w': False, 'a': False, 's': False, 'd': False}
         
+        # Calibrate neutral flexion position
+        if not self.calibration_complete:
+            self.calibration_timer += 1
+            if torso_flexion is not None:
+                self.calibration_frames.append(torso_flexion)
+            
+            # Calibrate after 90 frames (3 seconds at 30 FPS)
+            if self.calibration_timer >= 90 and len(self.calibration_frames) > 0:
+                self.neutral_flexion = np.mean(self.calibration_frames)
+                self.calibration_complete = True
+                print(f"🎯 Torso flexion calibrated: {self.neutral_flexion:.1f}° (neutral)")
+                return set(), {'w': False, 'a': False, 's': False, 'd': False}
+            else:
+                return set(), {'w': False, 'a': False, 's': False, 'd': False}
+        
         desired_keys = set()
         current_time = time.time()
         
         # Calculate release thresholds (closer to center)
         lean_release = self.lean_threshold * self.hysteresis
-        pitch_release = self.pitch_threshold * self.hysteresis
-        pitch_release_back = self.pitch_threshold_back * self.hysteresis
+        flexion_release = self.flexion_threshold * self.hysteresis
+        flexion_release_back = self.flexion_threshold_back * self.hysteresis
         
         # Release small lean keys if user returns to center
         if head_yaw >= -self.lean_threshold and head_yaw <= self.lean_threshold:
@@ -674,24 +741,35 @@ class WASDController:
                         self.last_lean_press_time['d'] = current_time
                         print(f"🔄 Small lean RIGHT: {head_yaw:.1f}° - Released 'D', waiting 75ms")
             
-        # Forward/Backward (W/S) - using head pose (switched W and S)
-        if 'w' in self.current_keys:
-            # Already pressing W
-            if head_pitch < pitch_release_back:
-                pass  # Release W
-            else:
-                desired_keys.add('w')  # Keep pressing W
-        elif head_pitch > self.pitch_threshold_back:
-            desired_keys.add('w')  # Start pressing W (head backward)
+        # Forward/Backward (W/S) - using torso flexion
+        if torso_flexion is not None and self.neutral_flexion is not None:
+            # Calculate flexion relative to neutral position
+            flexion_delta = torso_flexion - self.neutral_flexion
             
-        if 's' in self.current_keys:
-            # Already pressing S
-            if head_pitch > -pitch_release:
-                pass  # Release S
-            else:
-                desired_keys.add('s')  # Keep pressing S
-        elif head_pitch < -self.pitch_threshold:
-            desired_keys.add('s')  # Start pressing S (head forward)
+            # Debug output
+            self.debug_counter += 1
+            if self.debug_counter % 30 == 0:
+                print(f"🎯 Torso Flexion: {torso_flexion:.1f}° (delta: {flexion_delta:.1f}°, W threshold: {self.flexion_threshold}, S threshold: {self.flexion_threshold_back})")
+            
+            if 'w' in self.current_keys:
+                # Already pressing W
+                if flexion_delta < flexion_release:
+                    pass  # Release W
+                else:
+                    desired_keys.add('w')  # Keep pressing W
+            elif flexion_delta > self.flexion_threshold:
+                desired_keys.add('w')  # Start pressing W (forward flexion)
+                print(f"🎯 Forward Flexion: {flexion_delta:.1f}° - Pressing 'W'")
+                
+            if 's' in self.current_keys:
+                # Already pressing S
+                if flexion_delta > -flexion_release_back:
+                    pass  # Release S
+                else:
+                    desired_keys.add('s')  # Keep pressing S
+            elif flexion_delta < -self.flexion_threshold_back:
+                desired_keys.add('s')  # Start pressing S (backward flexion)
+                print(f"🎯 Backward Flexion: {flexion_delta:.1f}° - Pressing 'S'")
         
         # Release keys that should no longer be pressed
         keys_to_release = self.current_keys - desired_keys
@@ -805,7 +883,7 @@ class LeaningControlSystem:
         self.ui_overlay = MediaPipeOverlay(self.config_manager)
         
         print("Hybrid Control System initialized!")
-        print("Movement: Head tilt for A/D + Head pose for W/S")
+        print("Movement: Head tilt for A/D + Torso flexion for W/S")
         print("Right hand: Gun control + shooting + Krunker-style mouse")
         print("Left hand: Crouch/jump")
         print("Tongue: Spray emote")
@@ -871,8 +949,8 @@ class LeaningControlSystem:
         print("  '6' - Decrease dead zone")
         print("  'q' - Quit")
         print("\nMovement (WASD - Hybrid):")
-        print("  - Head FORWARD → Press 'S' (move forward)")
-        print("  - Head BACKWARD → Press 'W' (move backward)")
+        print("  - Torso FORWARD lean → Press 'W' (move forward)")
+        print("  - Torso BACKWARD lean → Press 'S' (move backward)")
         print("  - Body Lean LEFT (small) → Hold 'A' for 1s, wait 75ms, repeat")
         print("  - Body Lean LEFT (strong) → Hold 'A' down continuously")
         print("  - Body Lean RIGHT (small) → Hold 'D' for 1s, wait 75ms, repeat")
@@ -883,8 +961,8 @@ class LeaningControlSystem:
         print("  - Thumb DOWN = START FIRING")
         print("  - Index finger controls cursor")
         print("\nLeft Hand (Palm-Facing Controls):")
-        print("  - One finger down = Press 'CTRL' (Crouch)")
-        print("  - Four fingers down = Press 'SPACE' (Jump)")
+        print("  - One finger down = Press 'SPACE' (Jump)")
+        print("  - Four fingers down = Press 'CTRL' (Crouch)")
         print("  - Other positions = No action")
         print("\nTongue:")
         print("  - Stick out tongue = Press 'T' (Spray emote)")
@@ -928,9 +1006,16 @@ class LeaningControlSystem:
                 if frame_count % 3 == 0:
                     pose_results = self.pose.process(rgb_frame)
                     face_results = self.face_mesh.process(rgb_frame)
+                    
+                    # Debug pose detection
+                    if pose_results and pose_results.pose_landmarks:
+                        print(f"🎯 Pose detected - Frame {frame_count}")
+                    else:
+                        print(f"❌ No pose detected - Frame {frame_count}")
                 
                 # Initialize status variables
                 head_yaw, head_pitch = 0, 0
+                torso_flexion = None
                 active_wasd_keys = set()
                 wasd_states = {'w': False, 'a': False, 's': False, 'd': False}
                 
@@ -943,6 +1028,7 @@ class LeaningControlSystem:
                 tongue_status = "No face"
                 
                 # Process pose for body leaning (A/D only)
+                left_right_lean = 0  # Default value
                 if pose_results and pose_results.pose_landmarks:
                     try:
                         # Draw pose landmarks
@@ -952,7 +1038,11 @@ class LeaningControlSystem:
                             mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2, circle_radius=2)
                         )
                         
-                        # No body lean needed - using head tilt for A/D
+                        # Calculate body lean for UI display
+                        left_right_lean = calculate_lean_pose(pose_results.pose_landmarks, frame.shape[1], frame.shape[0])
+                        
+                        # Calculate torso flexion for W/S movement
+                        torso_flexion = calculate_torso_flexion(pose_results.pose_landmarks, frame.shape[1], frame.shape[0])
                         
                     except Exception as e:
                         print(f"Error processing pose: {e}")
@@ -970,6 +1060,7 @@ class LeaningControlSystem:
                         
                         # Head pose for W/S movement
                         head_yaw, head_pitch = calculate_head_pose(face_landmarks, w, h)
+                        print(f"🎯 Face detected - Pitch: {head_pitch:.1f}°, Yaw: {head_yaw:.1f}°")
                         
                         # Tongue detection for spray emote
                         tongue_out, tongue_status = self.tongue_controller.update(
@@ -979,9 +1070,9 @@ class LeaningControlSystem:
                     except Exception as e:
                         print(f"Error processing face: {e}")
                 
-                # Update WASD controller with head tilt (A/D) and head pose (W/S)
+                # Update WASD controller with head tilt (A/D) and torso flexion (W/S)
                 active_wasd_keys, wasd_states = self.wasd_controller.update(
-                    head_yaw, head_pitch, self.control_enabled
+                    head_yaw, torso_flexion, self.control_enabled
                 )
                 
                 # Debug output for hybrid detection
