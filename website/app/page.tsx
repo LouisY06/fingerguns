@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { Hand, Eye, Zap, Download, FileText, Move, Target, Pointer } from 'lucide-react';
+import { Hand, Zap, Download, FileText, Move, Pointer } from 'lucide-react';
 
 export default function Home() {
   return (

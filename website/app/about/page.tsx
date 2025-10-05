@@ -107,8 +107,8 @@ export default function About() {
               Each 30 FPS vision frame adds a movement delta to the backlog. The 120 Hz cursor thread exponentially drains this backlog by applying a fraction each tick:
             </p>
             <div className="bg-black p-6 rounded font-mono text-sm text-gray-300 mb-4 overflow-x-auto">
-              <div className="mb-2">backlog<sub>t+1</sub> = backlog<sub>t</sub> + new_delta  <span className="text-gray-500">// 30 FPS</span></div>
-              <div className="mb-2">movement = α · backlog<sub>t</sub>  <span className="text-gray-500">// 120 Hz</span></div>
+              <div className="mb-2">backlog<sub>t+1</sub> = backlog<sub>t</sub> + new_delta  <span className="text-gray-500">{'// 30 FPS'}</span></div>
+              <div className="mb-2">movement = α · backlog<sub>t</sub>  <span className="text-gray-500">{'// 120 Hz'}</span></div>
               <div className="mb-2">backlog<sub>t+1</sub> = backlog<sub>t</sub> - movement</div>
               <div className="text-gray-500 text-xs mt-4">
                 where α = 0.15 (drain rate per tick)

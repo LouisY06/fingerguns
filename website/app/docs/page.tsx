@@ -1,4 +1,4 @@
-import { Download, Camera, Settings, Play, Cpu, Monitor, AlertCircle } from 'lucide-react';
+import { Download, Camera, Settings, Play, Monitor, AlertCircle } from 'lucide-react';
 
 export default function Docs() {
   return (
