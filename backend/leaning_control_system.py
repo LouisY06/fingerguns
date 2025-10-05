@@ -315,6 +315,9 @@ class KrunkerStyleMouseController:
         # Dead zone for filtering hand tremors
         self.dead_zone = 0.8  # Increased to prevent spasms from small hand movements
         
+        # Smoothing factor for additional filtering
+        self.smoothing_factor = 0.7  # Exponential smoothing (0-1, higher = more smoothing)
+        
         # Thread control
         self.cursor_thread = None
         self.thread_running = False
@@ -443,6 +446,14 @@ class KrunkerStyleMouseController:
                 if movement_magnitude < self.dead_zone:
                     raw_delta_x = 0
                     raw_delta_y = 0
+                
+                # Apply exponential smoothing to reduce jitter
+                if self.smoothing_factor > 0:
+                    # Exponential smoothing: smoothed = α * new + (1-α) * previous
+                    self.velocity_x = self.smoothing_factor * raw_delta_x + (1 - self.smoothing_factor) * self.velocity_x
+                    self.velocity_y = self.smoothing_factor * raw_delta_y + (1 - self.smoothing_factor) * self.velocity_y
+                    raw_delta_x = self.velocity_x
+                    raw_delta_y = self.velocity_y
                 
                 # Update target for cursor thread to interpolate toward
                 with self.thread_lock:
@@ -1008,6 +1019,9 @@ class LeaningControlSystem:
                     'body_lean': {'lean': left_right_lean},
                     'tongue_out': tongue_out
                 }
+                
+                # Update overlay with current control state
+                self.ui_overlay.control_enabled = self.control_enabled
                 
                 # Draw gesture overlay
                 frame = self.ui_overlay.draw_gesture_overlay(frame, results)

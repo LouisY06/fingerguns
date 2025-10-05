@@ -36,6 +36,9 @@ class MediaPipeOverlay:
             "pitch_threshold_forward",
             "pitch_threshold_backward"
         ]
+        
+        # Control state (will be updated by main system)
+        self.control_enabled = False
     
     def draw_gesture_overlay(self, frame, results):
         """Draw gesture detection overlay on the frame"""
@@ -74,11 +77,27 @@ class MediaPipeOverlay:
         """Draw gesture status information on frame"""
         h, w = frame.shape[:2]
         
-        # Title overlay (top left)
-        cv2.putText(frame, "Hybrid Control System", (20, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(frame, "UI: C=Config H=Help M=Gestures", (20, 110), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 255), 1)
+        # Create semi-transparent background panels
+        self._draw_panel(frame, 10, 10, 300, 150, "CONTROL STATUS", alpha=0.8)
+        self._draw_panel(frame, w - 200, 10, 180, 100, "MOVEMENT", alpha=0.8)
+        self._draw_panel(frame, 10, h - 150, 350, 130, "GESTURE STATUS", alpha=0.8)
+        
+        # Main control status (top left) - wrapped in box
+        control_status = "CONTROL: ON ✓" if self.control_enabled else "CONTROL: OFF ✗"
+        control_color = (0, 255, 0) if self.control_enabled else (0, 0, 255)
+        self._draw_text_box(frame, control_status, (20, 40), control_color, 0.8, 2)
+        
+        # Sensitivity display - wrapped in box
+        current_config = self.config_manager.get_config()
+        sensitivity = current_config.get('mouse_sensitivity', 0.6)
+        self._draw_text_box(frame, f"Mouse Sens: {sensitivity:.1f}", (20, 70), (255, 255, 255), 0.6, 2)
+        
+        # Toggle instruction - wrapped in box
+        self._draw_text_box(frame, "Press 'G' to toggle (click window first!)", (20, 95), (255, 255, 0), 0.5, 1)
+        self._draw_text_box(frame, "Press 'Q' to quit | +/- to change sensitivity", (20, 115), (200, 200, 200), 0.5, 1)
+        
+        # Config shortcut - wrapped in box
+        self._draw_text_box(frame, "Press 'C' for config panel", (20, 135), (100, 255, 100), 0.5, 1)
         
         # Movement overlay (top right) - Clean WASD display
         self._draw_wasd_overlay(frame, w - 190, 30, wasd_states)
@@ -86,22 +105,53 @@ class MediaPipeOverlay:
         # Gesture status panel (bottom left) - Organized layout
         y_start = h - 130
         
-        # Right hand (gun)
+        # Right hand (gun) - wrapped in box
         gun_color = (0, 255, 0) if gun_active else (128, 128, 128)
-        cv2.putText(frame, f"🔫 Gun: {'ACTIVE' if gun_active else 'INACTIVE'}", (20, y_start + 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, gun_color, 2)
+        gun_text = f"🔫 Gun: {'ACTIVE' if gun_active else 'INACTIVE'}"
+        self._draw_text_box(frame, gun_text, (20, y_start + 20), gun_color, 0.6)
+        
         if gun_active:
-            cv2.putText(frame, f"   Shoot: {shoot_status}", (20, y_start + 45), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            shoot_text = f"   Shoot: {shoot_status}"
+            self._draw_text_box(frame, shoot_text, (20, y_start + 45), (255, 255, 255), 0.5)
         
-        # Left hand
-        cv2.putText(frame, f"✋ Left: {left_status}", (20, y_start + 70), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        # Left hand - wrapped in box
+        left_text = f"✋ Left: {left_status}"
+        self._draw_text_box(frame, left_text, (20, y_start + 70), (255, 255, 255), 0.6)
         
-        # Tongue
+        # Tongue - wrapped in box
         tongue_color = (0, 255, 0) if tongue_out else (128, 128, 128)
-        cv2.putText(frame, f"👅 Tongue: {tongue_status}", (20, y_start + 95), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, tongue_color, 2)
+        tongue_text = f"👅 Tongue: {tongue_status}"
+        self._draw_text_box(frame, tongue_text, (20, y_start + 95), tongue_color, 0.6)
+    
+    def _draw_panel(self, frame, x, y, width, height, title, alpha=0.7):
+        """Draw a semi-transparent panel with title"""
+        # Create overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (x, y), (x + width, y + height), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (x, y), (x + width, y + height), (255, 255, 255), 2)
+        
+        # Blend overlay
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        
+        # Add title
+        cv2.putText(frame, title, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    
+    def _draw_text_box(self, frame, text, position, color, font_scale=0.6, thickness=1):
+        """Draw text with a background box for better visibility"""
+        x, y = position
+        
+        # Get text size
+        (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        
+        # Draw background rectangle
+        padding = 5
+        cv2.rectangle(frame, 
+                     (x - padding, y - text_height - padding), 
+                     (x + text_width + padding, y + baseline + padding), 
+                     (0, 0, 0), -1)
+        
+        # Draw text
+        cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
     
     def _draw_wasd_overlay(self, frame, x, y, wasd_states):
         """Draw clean WASD movement indicator"""
@@ -113,11 +163,11 @@ class MediaPipeOverlay:
             'd': (x + 120, y + 50)
         }
         
-        # Draw active keys
+        # Draw active keys - wrapped in box
         active_keys = [key for key, active in wasd_states.items() if active]
         if active_keys:
-            cv2.putText(frame, f"Moving: {' '.join([k.upper() for k in active_keys])}", 
-                       (x + 10, y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            moving_text = f"Moving: {' '.join([k.upper() for k in active_keys])}"
+            self._draw_text_box(frame, moving_text, (x + 10, y + 80), (0, 255, 0), 0.5, 1)
         
         # Draw key circles
         for key, (kx, ky) in key_positions.items():
