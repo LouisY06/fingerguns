@@ -73,9 +73,20 @@ def calculate_head_pose(face_landmarks, w, h):
         chin_y = chin.y
         forehead_y = forehead.y
         
-        # Calculate pitch based on nose position relative to eye center
-        eye_center_y = (left_eye.y + right_eye.y) / 2
-        pitch = (nose_y - eye_center_y) * 100  # Scale factor for sensitivity
+        # Calculate pitch based on nose position relative to face height (better method)
+        face_height = chin_y - forehead_y
+        if face_height > 0:
+            nose_position = (nose_y - forehead_y) / face_height
+            pitch = (nose_position - 0.5) * 100  # Center around 0
+        else:
+            pitch = 0
+        
+        # Debug output
+        if not hasattr(calculate_head_pose, 'debug_counter'):
+            calculate_head_pose.debug_counter = 0
+        calculate_head_pose.debug_counter += 1
+        if calculate_head_pose.debug_counter % 30 == 0:
+            print(f"📊 Pitch: {pitch:.1f} (W threshold: {12}, S threshold: {-5})")
         
         return yaw, pitch
         
@@ -162,33 +173,6 @@ def detect_left_hand_gestures(hand_landmarks):
         print(f"Error in detect_left_hand_gestures: {e}")
         return "error", None
 
-def calculate_head_pose(face_landmarks, frame_width, frame_height):
-    """Calculate head pose (yaw and pitch for W/S movement)"""
-    try:
-        nose_tip = face_landmarks.landmark[1]
-        left_eye = face_landmarks.landmark[33]
-        right_eye = face_landmarks.landmark[263]
-        chin = face_landmarks.landmark[152]
-        forehead = face_landmarks.landmark[10]
-        
-        # Yaw (left/right) - not used for A/D anymore
-        eye_center_x = (left_eye.x + right_eye.x) / 2
-        nose_x = nose_tip.x
-        yaw = (nose_x - eye_center_x) * 100
-        
-        # Pitch (forward/backward) - used for W/S
-        nose_y = nose_tip.y
-        chin_y = chin.y
-        forehead_y = forehead.y
-        face_height = chin_y - forehead_y
-        nose_position = (nose_y - forehead_y) / face_height if face_height > 0 else 0.5
-        pitch = (nose_position - 0.5) * 100
-        
-        return yaw, pitch
-        
-    except Exception as e:
-        print(f"Error calculating head pose: {e}")
-        return 0, 0
 
 def calculate_lean_pose(pose_landmarks, frame_width, frame_height):
     """Calculate body lean for A/D movement based on shoulder and hip positions"""
@@ -537,7 +521,7 @@ class LeftHandGestureController:
 
 class WASDController:
     """Hybrid controller: Head tilt for A/D, head pose for W/S"""
-    def __init__(self, lean_threshold=3, pitch_threshold=8, pitch_threshold_back=12, hysteresis=0.7):
+    def __init__(self, lean_threshold=3, pitch_threshold=5, pitch_threshold_back=12, hysteresis=0.7):
         self.lean_threshold = lean_threshold  # For A/D (left/right lean)
         self.pitch_threshold = pitch_threshold  # For W (head forward)
         self.pitch_threshold_back = pitch_threshold_back  # For S (head backward)
@@ -1006,8 +990,16 @@ class LeaningControlSystem:
                 self.display_status(frame, wasd_states, gun_active, shoot_status, 
                                   left_status, tongue_status, head_yaw, head_pitch, tongue_out)
                 
+                # Add HUGE flashing reminder to toggle
+                reminder_color = (0, 255, 255) if (frame_count // 5) % 2 == 0 else (255, 0, 255)
+                cv2.putText(frame, ">>> CLICK HERE THEN PRESS 'G' <<<", (w//2 - 300, h - 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.0, reminder_color, 3)
+                
                 # Show frame
                 cv2.imshow('Hybrid Control System', frame)
+                # Try to bring window to front
+                cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 1)
+                cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 0)
                 
                 # Handle keyboard input (minimal wait for maximum FPS)
                 try:
