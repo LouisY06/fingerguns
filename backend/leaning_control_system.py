@@ -7,7 +7,7 @@ Combines:
 
 Controls:
 - 't' to toggle control ON/OFF
-- 'q' or ESC to quit
+- ESC to quit
 """
 
 import cv2
@@ -820,7 +820,7 @@ class LeaningControlSystem:
         print("  'g' - Toggle control ON/OFF")
         print("  '+' - Increase sensitivity")
         print("  '-' - Decrease sensitivity")
-        print("  'q' - Quit")
+        print("  'ESC' - Quit")
         print("\nMovement (WASD - Hybrid):")
         print("  - Head FORWARD → Press 'S' (move forward)")
         print("  - Head BACKWARD → Press 'W' (move backward)")
@@ -1007,7 +1007,7 @@ class LeaningControlSystem:
                 # Handle keyboard input (minimal wait for maximum FPS)
                 try:
                     key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q') or key == 27:  # 'q' or ESC to quit
+                    if key == 27:  # ESC to quit
                         print("Quit key pressed - exiting...")
                         break
                     elif key == ord('g'):
@@ -1079,7 +1079,7 @@ class LeaningControlSystem:
         
         # Toggle instruction
         cv2.putText(frame, "Press 'G' to toggle (click window first!)", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-        cv2.putText(frame, "Press 'Q' to quit | +/- to change sensitivity", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        cv2.putText(frame, "Press 'ESC' to quit | +/- to change sensitivity", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
         
         # Movement overlay (top right) - Clean WASD display
         self._draw_wasd_overlay(frame, w - 190, 30, wasd_states)

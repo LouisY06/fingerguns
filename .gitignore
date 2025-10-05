@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# PyInstaller build files
+*.spec
+backend/build/
+backend/dist/
+
+# App bundles and DMG
+*.dmg
+*.app
+
+# Build scripts (optional - uncomment if you don't want to track these)
+# backend/setup.py
+# backend/build_app.sh
+# backend/BUILD_APP.md
+
+# Backseat gamer leftover files
+backend/config.py
+backend/ai_commentary.py
+backend/backseat_mode.py
+backend/character_overlay.py
+backend/floating_character.py
+backend/setup_checker.py
+backend/test_window.py
+backend/BACKSEAT_MODE_README.md
+backend/QUICK_START.md
+backend/BACKSEAT_MODE_SUMMARY.md
+backend/FLOATING_CHARACTER_INFO.md
+backend/UPGRADE_SUMMARY.md
+backend/audio_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
