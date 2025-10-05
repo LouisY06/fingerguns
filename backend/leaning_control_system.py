@@ -144,28 +144,35 @@ def are_bottom_fingers_curled(hand_landmarks):
 
 
 def detect_left_hand_gestures(hand_landmarks):
-    """Detect left hand gestures for crouch/jump"""
+    """Detect left hand gestures for jump/knife/interact"""
     try:
         if not hasattr(hand_landmarks, 'landmark') or len(hand_landmarks.landmark) < 21:
             return "invalid", None
             
         landmarks = hand_landmarks.landmark
         
-        # Check individual finger states - for palm-facing camera, we check if fingers are DOWN
-        thumb_down = not is_finger_extended(landmarks, 4, 3, 2)
-        index_down = not is_finger_extended(landmarks, 8, 6, 5)
-        middle_down = not is_finger_extended(landmarks, 12, 10, 9)
-        ring_down = not is_finger_extended(landmarks, 16, 14, 13)
-        pinky_down = not is_finger_extended(landmarks, 20, 18, 17)
+        # Check individual finger states - check if fingers are UP (extended)
+        thumb_up = is_finger_extended(landmarks, 4, 3, 2)
+        index_up = is_finger_extended(landmarks, 8, 6, 5)
+        middle_up = is_finger_extended(landmarks, 12, 10, 9)
+        ring_up = is_finger_extended(landmarks, 16, 14, 13)
+        pinky_up = is_finger_extended(landmarks, 20, 18, 17)
         
-        # Gesture detection based on fingers DOWN
-        fingers_down = [thumb_down, index_down, middle_down, ring_down, pinky_down]
-        num_fingers_down = sum(fingers_down)
+        # Gesture detection based on fingers UP
+        # Priority order: most specific gestures first
         
-        if num_fingers_down == 1:  # One finger down
-            return "one_down", "ctrl"  # Crouch
-        elif num_fingers_down == 4:  # Four fingers down (thumb up)
-            return "four_down", "space"  # Jump
+        # Pinky + Index + Thumb up (middle and ring down) → Knife (Q)
+        if pinky_up and index_up and thumb_up and not middle_up and not ring_up:
+            return "knife", "q"
+        
+        # Pinky + Thumb up (index, middle, ring down) → Interact (E)
+        elif pinky_up and thumb_up and not index_up and not middle_up and not ring_up:
+            return "interact", "e"
+        
+        # Only Index up → Jump (Space)
+        elif index_up and not thumb_up and not middle_up and not ring_up and not pinky_up:
+            return "jump", "space"
+        
         else:
             return "unknown", None
             
@@ -826,9 +833,10 @@ class LeaningControlSystem:
         print("  - Thumb UP = ready to shoot")
         print("  - Thumb DOWN = START FIRING")
         print("  - Index finger controls cursor")
-        print("\nLeft Hand (Palm-Facing Controls):")
-        print("  - One finger down = Press 'CTRL' (Crouch)")
-        print("  - Four fingers down = Press 'SPACE' (Jump)")
+        print("\nLeft Hand (Gesture Controls):")
+        print("  - Index finger up (only) = Press 'SPACE' (Jump)")
+        print("  - Pinky + Index + Thumb up = Press 'Q' (Knife)")
+        print("  - Pinky + Thumb up = Press 'E' (Interact)")
         print("  - Other positions = No action")
         print("\nTongue:")
         print("  - Stick out tongue = Press 'T' (Spray emote)")
