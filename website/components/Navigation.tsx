@@ -10,7 +10,7 @@ export default function Navigation() {
   const navItems = [
     { label: 'Home', href: '/' },
     { label: 'About', href: '/about' },
-    { label: 'Docs', href: '/docs' },
+    { label: 'GitHub', href: 'https://github.com/LouisY06/fingerguns', external: true },
     { label: 'Download', href: '/download' },
   ];
 
@@ -26,13 +26,25 @@ export default function Navigation() {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
             {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="body-text text-sm text-gray-300 hover:text-white transition-smooth"
-              >
-                {item.label}
-              </Link>
+              item.external ? (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="body-text text-sm text-gray-300 hover:text-white transition-smooth"
+                >
+                  {item.label}
+                </a>
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="body-text text-sm text-gray-300 hover:text-white transition-smooth"
+                >
+                  {item.label}
+                </Link>
+              )
             ))}
           </div>
 
@@ -52,14 +64,27 @@ export default function Navigation() {
         <div className="md:hidden bg-black border-t border-gray-800">
           <div className="px-6 py-4 space-y-4">
             {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="block body-text text-gray-300 hover:text-white transition-smooth"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                {item.label}
-              </Link>
+              item.external ? (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block body-text text-gray-300 hover:text-white transition-smooth"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  {item.label}
+                </a>
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="block body-text text-gray-300 hover:text-white transition-smooth"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              )
             ))}
           </div>
         </div>
