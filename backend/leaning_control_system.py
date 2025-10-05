@@ -287,15 +287,26 @@ class ThumbShootingController:
 class KrunkerStyleMouseController:
     """Mouse controller with smooth movement and adjustable sensitivity"""
     def __init__(self):
-        self.sensitivity = 1.5  # Reduced for smoother movement
+        self.sensitivity = 2.5  # Increased for more responsive crosshair
         self.last_x = None
         self.last_y = None
         self.debug_counter = 0
         
-        # Smoothing variables
-        self.smoothing_factor = 0.7  # 0.0 = no smoothing, 1.0 = max smoothing
+        # Reduced smoothing for more responsive movement
+        self.smoothing_factor = 0.75  # Reduced from 0.92 for more responsiveness
         self.smoothed_delta_x = 0
         self.smoothed_delta_y = 0
+        
+        # Smaller buffer for more responsive movement
+        self.movement_buffer = []
+        self.buffer_size = 3  # Reduced from 5 for more responsiveness
+        
+        # Smaller dead zone for more sensitive movement
+        self.dead_zone = 1.0  # Reduced from 2.0 for more sensitivity
+        
+        # Velocity-based smoothing
+        self.last_movement_time = time.time()
+        self.movement_history = []  # Track recent movements for velocity calculation
         
     def _move_mouse_native(self, delta_x, delta_y):
         """Use native macOS CGEvent with delta fields - same as working Krunker code"""
@@ -335,6 +346,8 @@ class KrunkerStyleMouseController:
             # Reset smoothing when gun becomes inactive
             self.smoothed_delta_x = 0
             self.smoothed_delta_y = 0
+            self.movement_buffer = []  # Reset movement buffer
+            self.movement_history = []  # Reset movement history
             return
             
         try:
@@ -349,20 +362,39 @@ class KrunkerStyleMouseController:
                 raw_delta_x = (current_x - self.last_x) * self.sensitivity
                 raw_delta_y = (current_y - self.last_y) * self.sensitivity
                 
-                # Apply smoothing using exponential moving average
-                self.smoothed_delta_x = (self.smoothing_factor * self.smoothed_delta_x + 
-                                       (1 - self.smoothing_factor) * raw_delta_x)
-                self.smoothed_delta_y = (self.smoothing_factor * self.smoothed_delta_y + 
-                                       (1 - self.smoothing_factor) * raw_delta_y)
+                # Apply dead zone filter to eliminate micro-movements and jitter
+                movement_magnitude = (raw_delta_x**2 + raw_delta_y**2)**0.5
+                if movement_magnitude < self.dead_zone:
+                    # Movement too small - ignore it
+                    raw_delta_x = 0
+                    raw_delta_y = 0
                 
-                # Apply movement using smoothed values
-                if abs(self.smoothed_delta_x) > 0.3 or abs(self.smoothed_delta_y) > 0.3:
+                # Add to movement buffer for additional smoothing
+                self.movement_buffer.append((raw_delta_x, raw_delta_y))
+                if len(self.movement_buffer) > self.buffer_size:
+                    self.movement_buffer.pop(0)
+                
+                # Calculate buffer average for ultra-smooth movement
+                if len(self.movement_buffer) > 0:
+                    avg_delta_x = sum(d[0] for d in self.movement_buffer) / len(self.movement_buffer)
+                    avg_delta_y = sum(d[1] for d in self.movement_buffer) / len(self.movement_buffer)
+                else:
+                    avg_delta_x, avg_delta_y = raw_delta_x, raw_delta_y
+                
+                # Apply exponential smoothing to the averaged movement
+                self.smoothed_delta_x = (self.smoothing_factor * self.smoothed_delta_x + 
+                                       (1 - self.smoothing_factor) * avg_delta_x)
+                self.smoothed_delta_y = (self.smoothing_factor * self.smoothed_delta_y + 
+                                       (1 - self.smoothing_factor) * avg_delta_y)
+                
+                # Apply movement with lower threshold for more responsive movement
+                if abs(self.smoothed_delta_x) > 0.2 or abs(self.smoothed_delta_y) > 0.2:
                     self._move_mouse_native(int(self.smoothed_delta_x), int(self.smoothed_delta_y))
                 
                 # Debug output
                 self.debug_counter += 1
                 if self.debug_counter % 30 == 0:
-                    print(f"📍 Mouse: raw=({int(raw_delta_x)},{int(raw_delta_y)}) smooth=({int(self.smoothed_delta_x)},{int(self.smoothed_delta_y)})")
+                    print(f"📍 Mouse: raw=({int(raw_delta_x)},{int(raw_delta_y)}) smooth=({int(self.smoothed_delta_x)},{int(self.smoothed_delta_y)}) dead_zone={self.dead_zone}")
             
             self.last_x = current_x
             self.last_y = current_y
@@ -419,12 +451,22 @@ class LeftHandGestureController:
 
 class WASDController:
     """Hybrid controller: Head pose for W/S, body lean for A/D"""
-    def __init__(self, lean_threshold=5, pitch_threshold=8, pitch_threshold_back=12, hysteresis=0.7):
+    def __init__(self, lean_threshold=3, pitch_threshold=8, pitch_threshold_back=12, hysteresis=0.7):
         self.lean_threshold = lean_threshold  # For A/D (left/right lean)
         self.pitch_threshold = pitch_threshold  # For W (head forward)
         self.pitch_threshold_back = pitch_threshold_back  # For S (head backward)
         self.hysteresis = hysteresis  # Multiplier for release threshold
         self.current_keys = set()  # Currently pressed keys
+        
+        # Gradual movement for A/D (left/right lean)
+        self.lean_press_timer = 0
+        self.small_lean_hold_duration = 1.0  # Hold key for 1 second for small leans
+        self.small_lean_wait_duration = 0.075  # Wait 75ms between presses
+        self.strong_lean_threshold = 8  # Threshold for holding down key (lowered for better response)
+        self.last_lean_press_time = {'a': 0, 'd': 0}
+        self.lean_key_state = {'a': False, 'd': False}  # Track if key is currently held
+        self.lean_key_press_start = {'a': 0, 'd': 0}  # Track when key was pressed
+        self.debug_counter = 0
         
     def update(self, left_right_lean, head_pitch, control_enabled):
         """
@@ -434,17 +476,36 @@ class WASDController:
         if not control_enabled:
             # Release all keys if control disabled
             self.release_all_keys()
+            # Also release small lean keys
+            if self.lean_key_state['a']:
+                pyautogui.keyUp('a')
+                self.lean_key_state['a'] = False
+            if self.lean_key_state['d']:
+                pyautogui.keyUp('d')
+                self.lean_key_state['d'] = False
             return set(), {'w': False, 'a': False, 's': False, 'd': False}
         
         desired_keys = set()
+        current_time = time.time()
         
         # Calculate release thresholds (closer to center)
         lean_release = self.lean_threshold * self.hysteresis
         pitch_release = self.pitch_threshold * self.hysteresis
         pitch_release_back = self.pitch_threshold_back * self.hysteresis
         
+        # Release small lean keys if user returns to center
+        if left_right_lean >= -self.lean_threshold and left_right_lean <= self.lean_threshold:
+            if self.lean_key_state['a']:
+                pyautogui.keyUp('a')
+                self.lean_key_state['a'] = False
+                print(f"🔄 Returned to center - Released 'A'")
+            if self.lean_key_state['d']:
+                pyautogui.keyUp('d')
+                self.lean_key_state['d'] = False
+                print(f"🔄 Returned to center - Released 'D'")
+        
         # Determine which keys should be pressed (with hysteresis)
-        # Left/Right lean (A/D) - using body lean
+        # Left/Right lean (A/D) - using body lean with gradual movement
         if 'a' in self.current_keys:
             # Already pressing A
             if left_right_lean > -lean_release:
@@ -452,7 +513,30 @@ class WASDController:
             else:
                 desired_keys.add('a')  # Keep pressing A
         elif left_right_lean < -self.lean_threshold:
-            desired_keys.add('a')  # Start pressing A (lean left)
+            # Check if we should press A
+            if left_right_lean < -self.strong_lean_threshold:
+                # Strong lean - hold down continuously
+                desired_keys.add('a')
+            else:
+                # Small lean - hold for 1 second, wait 75ms, repeat
+                if not self.lean_key_state['a']:
+                    # Key is not currently held - check if we can start a new press
+                    time_since_last_release = current_time - self.last_lean_press_time['a']
+                    if time_since_last_release >= self.small_lean_wait_duration:
+                        # Start holding the key
+                        pyautogui.keyDown('a')
+                        self.lean_key_state['a'] = True
+                        self.lean_key_press_start['a'] = current_time
+                        print(f"🔄 Small lean LEFT: {left_right_lean:.1f}° - Holding 'A' for 1s")
+                else:
+                    # Key is currently held - check if we should release it
+                    hold_duration = current_time - self.lean_key_press_start['a']
+                    if hold_duration >= self.small_lean_hold_duration:
+                        # Release the key after 1 second
+                        pyautogui.keyUp('a')
+                        self.lean_key_state['a'] = False
+                        self.last_lean_press_time['a'] = current_time
+                        print(f"🔄 Small lean LEFT: {left_right_lean:.1f}° - Released 'A', waiting 75ms")
             
         if 'd' in self.current_keys:
             # Already pressing D
@@ -461,7 +545,30 @@ class WASDController:
             else:
                 desired_keys.add('d')  # Keep pressing D
         elif left_right_lean > self.lean_threshold:
-            desired_keys.add('d')  # Start pressing D (lean right)
+            # Check if we should press D
+            if left_right_lean > self.strong_lean_threshold:
+                # Strong lean - hold down continuously
+                desired_keys.add('d')
+            else:
+                # Small lean - hold for 1 second, wait 75ms, repeat
+                if not self.lean_key_state['d']:
+                    # Key is not currently held - check if we can start a new press
+                    time_since_last_release = current_time - self.last_lean_press_time['d']
+                    if time_since_last_release >= self.small_lean_wait_duration:
+                        # Start holding the key
+                        pyautogui.keyDown('d')
+                        self.lean_key_state['d'] = True
+                        self.lean_key_press_start['d'] = current_time
+                        print(f"🔄 Small lean RIGHT: {left_right_lean:.1f}° - Holding 'D' for 1s")
+                else:
+                    # Key is currently held - check if we should release it
+                    hold_duration = current_time - self.lean_key_press_start['d']
+                    if hold_duration >= self.small_lean_hold_duration:
+                        # Release the key after 1 second
+                        pyautogui.keyUp('d')
+                        self.lean_key_state['d'] = False
+                        self.last_lean_press_time['d'] = current_time
+                        print(f"🔄 Small lean RIGHT: {left_right_lean:.1f}° - Released 'D', waiting 75ms")
             
         # Forward/Backward (W/S) - using head pose (switched W and S)
         if 'w' in self.current_keys:
@@ -499,6 +606,11 @@ class WASDController:
             pyautogui.keyDown(key)  # Keep pressing the key to ensure it stays down
         
         self.current_keys = desired_keys
+        
+        # Debug output for lean values
+        self.debug_counter += 1
+        if self.debug_counter % 60 == 0:  # Every 60 frames (about 6 seconds at 10 FPS)
+            print(f"📊 Lean Debug: left_right={left_right_lean:.1f}° (threshold={self.lean_threshold}°, strong={self.strong_lean_threshold}°)")
         
         # Create key state dict for display
         key_states = {
@@ -632,12 +744,18 @@ class LeaningControlSystem:
         print("  '-' - Decrease crosshair sensitivity (large)")
         print("  '=' - Increase crosshair sensitivity (small)")
         print("  '0' - Decrease crosshair sensitivity (small)")
+        print("  '9' - Increase smoothing")
+        print("  '8' - Decrease smoothing")
+        print("  '7' - Increase dead zone")
+        print("  '6' - Decrease dead zone")
         print("  'q' - Quit")
         print("\nMovement (WASD - Hybrid):")
         print("  - Head FORWARD → Press 'S' (move forward)")
         print("  - Head BACKWARD → Press 'W' (move backward)")
-        print("  - Body Lean LEFT → Press 'A' (move left)")
-        print("  - Body Lean RIGHT → Press 'D' (move right)")
+        print("  - Body Lean LEFT (small) → Hold 'A' for 1s, wait 75ms, repeat")
+        print("  - Body Lean LEFT (strong) → Hold 'A' down continuously")
+        print("  - Body Lean RIGHT (small) → Hold 'D' for 1s, wait 75ms, repeat")
+        print("  - Body Lean RIGHT (strong) → Hold 'D' down continuously")
         print("\nRight Hand (Gun Control):")
         print("  - Gun gesture (index out, bottom 3 curled)")
         print("  - Thumb UP = ready to shoot")
@@ -650,6 +768,9 @@ class LeaningControlSystem:
         print("\nTongue:")
         print("  - Stick out tongue = Press 'T' (Spray emote)")
         print("\nPerfect for hybrid CS:GO control!")
+        print("=" * 50)
+        print("⚠️  IMPORTANT: Click on the camera window to enable keyboard controls!")
+        print("   The 'g' key will only work when the window is focused.")
         print("=" * 50)
         
         frame_count = 0
@@ -805,9 +926,9 @@ class LeaningControlSystem:
                 # Show frame
                 cv2.imshow('Hybrid Control System', frame)
                 
-                # Handle keyboard input
+                # Handle keyboard input (with longer wait for better responsiveness)
                 try:
-                    key = cv2.waitKey(1) & 0xFF
+                    key = cv2.waitKey(30) & 0xFF
                     if key == ord('q') or key == 27:  # 'q' or ESC to quit
                         print("Quit key pressed - exiting...")
                         break
@@ -831,6 +952,18 @@ class LeaningControlSystem:
                     elif key == ord('0'):
                         self.mouse_controller.krunker_controller.sensitivity = max(0.1, self.mouse_controller.krunker_controller.sensitivity - 0.05)
                         print(f"🎯 Crosshair sensitivity fine-tuned to {self.mouse_controller.krunker_controller.sensitivity:.2f}")
+                    elif key == ord('9'):
+                        self.mouse_controller.krunker_controller.smoothing_factor = min(0.95, self.mouse_controller.krunker_controller.smoothing_factor + 0.05)
+                        print(f"🌊 Smoothing increased to {self.mouse_controller.krunker_controller.smoothing_factor:.2f}")
+                    elif key == ord('8'):
+                        self.mouse_controller.krunker_controller.smoothing_factor = max(0.3, self.mouse_controller.krunker_controller.smoothing_factor - 0.05)
+                        print(f"🌊 Smoothing decreased to {self.mouse_controller.krunker_controller.smoothing_factor:.2f}")
+                    elif key == ord('7'):
+                        self.mouse_controller.krunker_controller.dead_zone = min(10.0, self.mouse_controller.krunker_controller.dead_zone + 0.5)
+                        print(f"🚫 Dead zone increased to {self.mouse_controller.krunker_controller.dead_zone:.1f}")
+                    elif key == ord('6'):
+                        self.mouse_controller.krunker_controller.dead_zone = max(0.5, self.mouse_controller.krunker_controller.dead_zone - 0.5)
+                        print(f"🚫 Dead zone decreased to {self.mouse_controller.krunker_controller.dead_zone:.1f}")
                 except Exception as e:
                     print(f"Error handling keyboard input: {e}")
                     
@@ -876,7 +1009,7 @@ class LeaningControlSystem:
         cv2.putText(frame, control_status, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, control_color, 2)
         
         # Toggle instruction
-        cv2.putText(frame, "Press 'G' to toggle", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        cv2.putText(frame, "Press 'G' to toggle (click window first!)", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
         cv2.putText(frame, "Press 'Q' to quit", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
         
         # Movement overlay (top right) - Clean WASD display
