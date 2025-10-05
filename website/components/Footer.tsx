@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Github, Twitter, Mail } from 'lucide-react';
+import { Github } from 'lucide-react';
 
 export default function Footer() {
   return (
@@ -23,22 +23,6 @@ export default function Footer() {
                 aria-label="GitHub"
               >
                 <Github size={20} />
-              </a>
-              <a
-                href="https://twitter.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-gray-400 hover:text-white transition-smooth"
-                aria-label="Twitter"
-              >
-                <Twitter size={20} />
-              </a>
-              <a
-                href="mailto:contact@fingerguns.com"
-                className="text-gray-400 hover:text-white transition-smooth"
-                aria-label="Email"
-              >
-                <Mail size={20} />
               </a>
             </div>
           </div>
@@ -78,11 +62,6 @@ export default function Footer() {
                 <Link href="/docs" className="body-text text-sm text-gray-400 hover:text-white transition-smooth">
                   Help Center
                 </Link>
-              </li>
-              <li>
-                <a href="mailto:support@fingerguns.com" className="body-text text-sm text-gray-400 hover:text-white transition-smooth">
-                  Contact
-                </a>
               </li>
             </ul>
           </div>

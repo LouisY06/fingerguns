@@ -32,7 +32,7 @@ export default function DownloadPage() {
                 Coming Soon
               </button>
               <p className="body-text text-xs text-gray-500 mt-3 text-center">
-                Version 1.0.0 • Windows 10/11
+                Version 1.0.0 • Cross-platform
               </p>
             </div>
 
@@ -75,24 +75,28 @@ export default function DownloadPage() {
       {/* System Requirements Quick Reference */}
       <section className="py-24 px-6 lg:px-8 bg-gray-950">
         <div className="max-w-5xl mx-auto">
-          <h2 className="h2-text text-white mb-12 text-center">System Requirements</h2>
+          <h2 className="h2-text text-white mb-12 text-center">Recommended Requirements</h2>
+          <p className="body-text text-gray-400 text-center max-w-2xl mx-auto mb-8">
+            For optimal gesture tracking performance
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-black border border-gray-800 p-6 text-center">
               <h4 className="h4-text text-white mb-3">Operating System</h4>
               <p className="body-text text-sm text-gray-400">
-                Windows 10 or later
+                Windows 11 / macOS 12+
               </p>
             </div>
             <div className="bg-black border border-gray-800 p-6 text-center">
               <h4 className="h4-text text-white mb-3">Camera</h4>
               <p className="body-text text-sm text-gray-400">
-                720p webcam minimum<br />1080p recommended
+                1080p at 60 FPS<br />
+                <span className="text-gray-500 text-xs">(30 FPS works, 60 FPS better)</span>
               </p>
             </div>
             <div className="bg-black border border-gray-800 p-6 text-center">
-              <h4 className="h4-text text-white mb-3">Memory</h4>
+              <h4 className="h4-text text-white mb-3">Hardware</h4>
               <p className="body-text text-sm text-gray-400">
-                8 GB RAM minimum<br />16 GB recommended
+                16 GB RAM<br />i7 / Ryzen 7 / M1+
               </p>
             </div>
           </div>
@@ -102,7 +106,7 @@ export default function DownloadPage() {
               className="inline-flex items-center body-text text-sm text-gray-400 hover:text-white transition-smooth"
             >
               <FileText className="mr-2" size={16} />
-              View Full System Requirements
+              View Full Requirements & Setup Guide
             </Link>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { Download, Camera, Settings, Play, Cpu, Monitor, AlertCircle } from 'lucide-react';
+import { Download, Camera, Settings, Play, Monitor, AlertCircle } from 'lucide-react';
 
 export default function Docs() {
   return (
@@ -74,60 +74,43 @@ export default function Docs() {
       {/* System Requirements */}
       <section className="py-24 px-6 lg:px-8 bg-black">
         <div className="max-w-5xl mx-auto">
-          <h2 className="h2-text text-white mb-12 text-center">System Requirements</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Minimum Requirements */}
-            <div className="bg-gray-950 border border-gray-800 p-8">
-              <div className="flex items-center mb-6">
-                <div className="w-10 h-10 bg-gray-800 flex items-center justify-center mr-4">
-                  <Cpu className="text-white" size={20} />
-                </div>
-                <h3 className="h3-text text-white">Minimum</h3>
-              </div>
-              <ul className="space-y-3">
-                <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">OS:</span> Windows 10 or later
-                </li>
-                <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">Processor:</span> Intel Core i5-4460 or equivalent
-                </li>
-                <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">Memory:</span> 8 GB RAM
-                </li>
-                <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">Camera:</span> 720p webcam at 30 FPS
-                </li>
-                <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">Python:</span> Python 3.8 or later
-                </li>
-              </ul>
-            </div>
-
-            {/* Recommended Requirements */}
+          <h2 className="h2-text text-white mb-12 text-center">Recommended System Requirements</h2>
+          <p className="body-text text-gray-400 text-center max-w-2xl mx-auto mb-12">
+            For optimal performance and smooth gesture tracking experience
+          </p>
+          <div className="max-w-3xl mx-auto">
             <div className="bg-gray-950 border border-gray-800 p-8">
               <div className="flex items-center mb-6">
                 <div className="w-10 h-10 bg-gray-800 flex items-center justify-center mr-4">
                   <Monitor className="text-white" size={20} />
                 </div>
-                <h3 className="h3-text text-white">Recommended</h3>
+                <h3 className="h3-text text-white">Recommended Specs</h3>
               </div>
               <ul className="space-y-3">
                 <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">OS:</span> Windows 11
+                  <span className="text-white font-semibold">OS:</span> Windows 11 / macOS 12+ (Monterey or later)
                 </li>
                 <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">Processor:</span> Intel Core i7-8700K or equivalent
+                  <span className="text-white font-semibold">Processor:</span> Intel Core i7 / AMD Ryzen 7 / Apple M1/M2
                 </li>
                 <li className="body-text text-sm text-gray-300">
                   <span className="text-white font-semibold">Memory:</span> 16 GB RAM
                 </li>
                 <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">Camera:</span> 1080p webcam at 60 FPS
+                  <span className="text-white font-semibold">Camera:</span> 1080p webcam at 60 FPS (30 FPS acceptable, but 60 FPS provides better tracking)
                 </li>
                 <li className="body-text text-sm text-gray-300">
-                  <span className="text-white font-semibold">Python:</span> Python 3.10 or later
+                  <span className="text-white font-semibold">Python:</span> Python 3.8+ with pip
+                </li>
+                <li className="body-text text-sm text-gray-300">
+                  <span className="text-white font-semibold">Dependencies:</span> MediaPipe, OpenCV, PyAutoGUI, NumPy
                 </li>
               </ul>
+              <div className="mt-6 pt-6 border-t border-gray-800">
+                <p className="body-text text-xs text-gray-500">
+                  Note: Actual camera FPS performance depends on CPU capability. The system uses 120 FPS interpolation to ensure smooth cursor movement regardless of camera framerate.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -138,9 +121,9 @@ export default function Docs() {
         <div className="max-w-5xl mx-auto">
           <h2 className="h2-text text-white mb-12 text-center">Gesture Controls Reference</h2>
           
-          {/* Hand Gestures */}
+          {/* Right Hand Gestures */}
           <div className="mb-12">
-            <h3 className="h3-text text-white mb-6">Hand Gestures</h3>
+            <h3 className="h3-text text-white mb-6">Right Hand - Gun Control</h3>
             <div className="bg-black border border-gray-800 overflow-hidden">
               <table className="w-full">
                 <thead>
@@ -152,38 +135,56 @@ export default function Docs() {
                 </thead>
                 <tbody>
                   <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Index Finger Point</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Gun Gesture</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Activate Aiming</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Index finger out, bottom 3 fingers curled</td>
+                  </tr>
+                  <tr className="border-b border-gray-800">
+                    <td className="body-text text-sm text-gray-300 p-4">Index Finger Move</td>
                     <td className="body-text text-sm text-gray-300 p-4">Aim Crosshair</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Move your index finger to aim</td>
-                  </tr>
-                  <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Hand Recoil</td>
-                    <td className="body-text text-sm text-gray-300 p-4">Fire Weapon</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Quick backward hand motion triggers shooting</td>
-                  </tr>
-                  <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Thumb Up</td>
-                    <td className="body-text text-sm text-gray-300 p-4">Switch Weapon Up</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Cycle to next weapon</td>
-                  </tr>
-                  <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Thumb Down</td>
-                    <td className="body-text text-sm text-gray-300 p-4">Switch Weapon Down</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Cycle to previous weapon</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Move index finger tip to control cursor</td>
                   </tr>
                   <tr>
-                    <td className="body-text text-sm text-gray-300 p-4">Closed Fist</td>
-                    <td className="body-text text-sm text-gray-300 p-4">Reload</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Reload current weapon</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Thumb Down</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Fire Weapon</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Press thumb down to start firing</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* Head Movements */}
-          <div>
-            <h3 className="h3-text text-white mb-6">Head Movements</h3>
+          {/* Left Hand Gestures */}
+          <div className="mb-12">
+            <h3 className="h3-text text-white mb-6">Left Hand - Actions (Palm Facing Camera)</h3>
+            <div className="bg-black border border-gray-800 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-800">
+                    <th className="body-text text-left text-white font-semibold p-4">Gesture</th>
+                    <th className="body-text text-left text-white font-semibold p-4">Action</th>
+                    <th className="body-text text-left text-white font-semibold p-4">Key Pressed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-gray-800">
+                    <td className="body-text text-sm text-gray-300 p-4">1 Finger Down</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Crouch</td>
+                    <td className="body-text text-sm text-gray-400 p-4">CTRL</td>
+                  </tr>
+                  <tr>
+                    <td className="body-text text-sm text-gray-300 p-4">4 Fingers Down</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Jump</td>
+                    <td className="body-text text-sm text-gray-400 p-4">SPACE</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Body & Head Movement */}
+          <div className="mb-12">
+            <h3 className="h3-text text-white mb-6">Body & Head - WASD Movement</h3>
             <div className="bg-black border border-gray-800 overflow-hidden">
               <table className="w-full">
                 <thead>
@@ -195,29 +196,80 @@ export default function Docs() {
                 </thead>
                 <tbody>
                   <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Tilt Forward</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Head Forward</td>
                     <td className="body-text text-sm text-gray-300 p-4">Move Forward (W)</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Tilt head down to move forward</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Lean head forward to activate</td>
                   </tr>
                   <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Tilt Backward</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Head Backward</td>
                     <td className="body-text text-sm text-gray-300 p-4">Move Backward (S)</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Tilt head up to move backward</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Lean head backward to activate</td>
                   </tr>
                   <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Tilt Left</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Body Lean Left</td>
                     <td className="body-text text-sm text-gray-300 p-4">Strafe Left (A)</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Tilt head left to strafe left</td>
-                  </tr>
-                  <tr className="border-b border-gray-800">
-                    <td className="body-text text-sm text-gray-300 p-4">Tilt Right</td>
-                    <td className="body-text text-sm text-gray-300 p-4">Strafe Right (D)</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Tilt head right to strafe right</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Lean body left (strong = hold, weak = tap)</td>
                   </tr>
                   <tr>
-                    <td className="body-text text-sm text-gray-300 p-4">Nod Down Quickly</td>
-                    <td className="body-text text-sm text-gray-300 p-4">Crouch</td>
-                    <td className="body-text text-sm text-gray-400 p-4">Quick downward nod to crouch</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Body Lean Right</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Strafe Right (D)</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Lean body right (strong = hold, weak = tap)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Facial Gestures */}
+          <div>
+            <h3 className="h3-text text-white mb-6">Facial Gestures</h3>
+            <div className="bg-black border border-gray-800 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-800">
+                    <th className="body-text text-left text-white font-semibold p-4">Gesture</th>
+                    <th className="body-text text-left text-white font-semibold p-4">Action</th>
+                    <th className="body-text text-left text-white font-semibold p-4">Key Pressed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="body-text text-sm text-gray-300 p-4">Stick Out Tongue</td>
+                    <td className="body-text text-sm text-gray-300 p-4">Spray Emote</td>
+                    <td className="body-text text-sm text-gray-400 p-4">T</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Keyboard Shortcuts */}
+          <div className="mt-12">
+            <h3 className="h3-text text-white mb-6">Keyboard Shortcuts</h3>
+            <div className="bg-black border border-gray-800 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-800">
+                    <th className="body-text text-left text-white font-semibold p-4">Key</th>
+                    <th className="body-text text-left text-white font-semibold p-4">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-gray-800">
+                    <td className="body-text text-sm text-gray-300 p-4">G</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Toggle control ON/OFF</td>
+                  </tr>
+                  <tr className="border-b border-gray-800">
+                    <td className="body-text text-sm text-gray-300 p-4">+</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Increase sensitivity (0.1-1.0)</td>
+                  </tr>
+                  <tr className="border-b border-gray-800">
+                    <td className="body-text text-sm text-gray-300 p-4">-</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Decrease sensitivity</td>
+                  </tr>
+                  <tr>
+                    <td className="body-text text-sm text-gray-300 p-4">Q</td>
+                    <td className="body-text text-sm text-gray-400 p-4">Quit program</td>
                   </tr>
                 </tbody>
               </table>
