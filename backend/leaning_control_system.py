@@ -98,7 +98,7 @@ def are_bottom_fingers_curled(hand_landmarks):
 
 
 def detect_left_hand_gestures(hand_landmarks):
-    """Detect left hand gestures for crouch/jump/scope"""
+    """Detect left hand gestures for crouch/jump"""
     try:
         if not hasattr(hand_landmarks, 'landmark') or len(hand_landmarks.landmark) < 21:
             return "invalid", None
@@ -118,8 +118,6 @@ def detect_left_hand_gestures(hand_landmarks):
         
         if num_fingers_down == 1:  # One finger down
             return "one_down", "ctrl"  # Crouch
-        elif num_fingers_down == 2:  # Two fingers down
-            return "two_down", "right_mouse"  # Scope in
         elif num_fingers_down == 4:  # Four fingers down (thumb up)
             return "four_down", "space"  # Jump
         else:
@@ -384,20 +382,15 @@ class SmoothMouseController:
         self.krunker_controller.update(hand_landmarks, gun_active)
 
 class LeftHandGestureController:
-    """Left hand gesture controller for crouch/jump/scope"""
+    """Left hand gesture controller for crouch/jump"""
     def __init__(self):
         self.last_gesture = None
         self.last_gesture_time = 0
         self.gesture_debounce = 0.1
-        self.right_mouse_pressed = False
         
     def update(self, hand_landmarks, control_enabled):
         try:
             if not control_enabled or hand_landmarks is None:
-                # Release right mouse if pressed
-                if self.right_mouse_pressed:
-                    pyautogui.mouseUp(button='right')
-                    self.right_mouse_pressed = False
                 return None, "Control Disabled"
             
             current_time = time.time()
@@ -406,27 +399,8 @@ class LeftHandGestureController:
             if gesture_name == "error" or gesture_name == "invalid":
                 return None, "Gesture detection error"
             
-            # Handle right mouse button (scope) differently - continuous press
-            if action_key == "right_mouse":
-                if gesture_name == "two_down":
-                    if not self.right_mouse_pressed:
-                        pyautogui.mouseDown(button='right')
-                        self.right_mouse_pressed = True
-                        self.last_gesture = gesture_name
-                        self.last_gesture_time = current_time
-                        return "right_mouse", "SCOPE IN - Two fingers down"
-                    else:
-                        return "right_mouse", "Holding scope"
-                else:
-                    # Release scope if not two fingers down
-                    if self.right_mouse_pressed:
-                        pyautogui.mouseUp(button='right')
-                        self.right_mouse_pressed = False
-                        self.last_gesture = None
-                    return None, "Scope released"
-            
-            # Handle other gestures (crouch/jump) - single press
-            elif action_key and gesture_name != self.last_gesture:
+            # Handle gestures (crouch/jump) - single press
+            if action_key and gesture_name != self.last_gesture:
                 if current_time - self.last_gesture_time > self.gesture_debounce:
                     pyautogui.press(action_key)
                     self.last_gesture = gesture_name
@@ -615,6 +589,7 @@ class LeaningControlSystem:
         print("Left hand: Crouch/jump")
         print("Tongue: Spray emote")
     
+    
     def identify_hands(self, hand_landmarks_list):
         """Identify which hand is left vs right based on position (from dual_hand_tracking.py)"""
         if len(hand_landmarks_list) == 0:
@@ -653,8 +628,10 @@ class LeaningControlSystem:
         print("=" * 50)
         print("Controls:")
         print("  'g' - Toggle control ON/OFF")
-        print("  '+' - Increase mouse sensitivity")
-        print("  '-' - Decrease mouse sensitivity")
+        print("  '+' - Increase crosshair sensitivity (large)")
+        print("  '-' - Decrease crosshair sensitivity (large)")
+        print("  '=' - Increase crosshair sensitivity (small)")
+        print("  '0' - Decrease crosshair sensitivity (small)")
         print("  'q' - Quit")
         print("\nMovement (WASD - Hybrid):")
         print("  - Head FORWARD → Press 'S' (move forward)")
@@ -668,7 +645,6 @@ class LeaningControlSystem:
         print("  - Index finger controls cursor")
         print("\nLeft Hand (Palm-Facing Controls):")
         print("  - One finger down = Press 'CTRL' (Crouch)")
-        print("  - Two fingers down = Right Mouse Button (Scope In)")
         print("  - Four fingers down = Press 'SPACE' (Jump)")
         print("  - Other positions = No action")
         print("\nTongue:")
@@ -843,12 +819,18 @@ class LeaningControlSystem:
                         print(f"\n{'='*50}")
                         print(f"Control {'ENABLED ✓' if self.control_enabled else 'DISABLED ✗'}")
                         print(f"{'='*50}\n")
-                    elif key == ord('+') or key == ord('='):
+                    elif key == ord('+'):
                         self.mouse_controller.krunker_controller.sensitivity += 0.2
-                        print(f"📈 Sensitivity increased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
+                        print(f"🎯 Crosshair sensitivity increased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
                     elif key == ord('-') or key == ord('_'):
                         self.mouse_controller.krunker_controller.sensitivity = max(0.1, self.mouse_controller.krunker_controller.sensitivity - 0.2)
-                        print(f"📉 Sensitivity decreased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
+                        print(f"🎯 Crosshair sensitivity decreased to {self.mouse_controller.krunker_controller.sensitivity:.1f}")
+                    elif key == ord('='):
+                        self.mouse_controller.krunker_controller.sensitivity += 0.05
+                        print(f"🎯 Crosshair sensitivity fine-tuned to {self.mouse_controller.krunker_controller.sensitivity:.2f}")
+                    elif key == ord('0'):
+                        self.mouse_controller.krunker_controller.sensitivity = max(0.1, self.mouse_controller.krunker_controller.sensitivity - 0.05)
+                        print(f"🎯 Crosshair sensitivity fine-tuned to {self.mouse_controller.krunker_controller.sensitivity:.2f}")
                 except Exception as e:
                     print(f"Error handling keyboard input: {e}")
                     
@@ -862,10 +844,6 @@ class LeaningControlSystem:
                 print("Cleaning up resources...")
                 self.shooting_controller.force_release()
                 self.wasd_controller.release_all_keys()
-                # Release right mouse button if pressed (scope)
-                if self.left_hand_controller.right_mouse_pressed:
-                    pyautogui.mouseUp(button='right')
-                    self.left_hand_controller.right_mouse_pressed = False
                 # Clean up mouse controller
                 self.mouse_controller.krunker_controller.last_x = None
                 self.mouse_controller.krunker_controller.last_y = None
