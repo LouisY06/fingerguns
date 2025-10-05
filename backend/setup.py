@@ -3,9 +3,14 @@ Setup script to create a macOS .app bundle
 Usage: python setup.py py2app
 """
 from setuptools import setup
+import os
 
 APP = ['leaning_control_system.py']
 DATA_FILES = []
+
+# Check if icon exists
+icon_file = 'icon.icns' if os.path.exists('icon.icns') else None
+
 OPTIONS = {
     'argv_emulation': False,
     'packages': [
@@ -14,16 +19,18 @@ OPTIONS = {
         'numpy',
         'pyautogui',
         'pynput',
+        'Quartz',
     ],
-    'iconfile': None,  # Add path to .icns file if you have one
+    'iconfile': icon_file,
     'plist': {
         'CFBundleName': 'FingerGuns',
-        'CFBundleDisplayName': 'FingerGuns Gesture Control',
+        'CFBundleDisplayName': 'FingerGuns',
         'CFBundleIdentifier': 'com.fingerguns.gesturecontrol',
         'CFBundleVersion': '1.0.0',
         'CFBundleShortVersionString': '1.0.0',
-        'NSCameraUsageDescription': 'This app needs camera access for gesture control.',
+        'NSCameraUsageDescription': 'FingerGuns needs camera access for hand gesture tracking and game control.',
         'NSHighResolutionCapable': True,
+        'LSMinimumSystemVersion': '10.15.0',
     },
 }
 

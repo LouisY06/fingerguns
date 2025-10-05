@@ -16,8 +16,6 @@ import numpy as np
 import pyautogui
 import time
 import threading
-from pynput.mouse import Controller as MouseController
-import Quartz
 from Quartz import (
     CGEventCreateMouseEvent, CGEventPost, CGEventSourceCreate,
     kCGEventMouseMoved, kCGEventLeftMouseDown, kCGEventLeftMouseUp,
@@ -342,27 +340,50 @@ class KrunkerStyleMouseController:
         self.cursor_update_rate = 120  # Hz - cursor updates per second
         self.interpolation_speed = 0.15  # How fast to interpolate (0-1, lower = smoother, less overshoot)
         
+        # Track discontinuations to prevent snapping after repositioning
+        self.last_update_time = None
+        self.discontinuation_threshold = 0.1  # 100ms - if no update for this long, treat as discontinuation
+        
     def _move_mouse_native(self, delta_x, delta_y):
-        """Use native macOS CGEvent with delta fields"""
+        """Use native macOS CGEvent with delta fields for Krunker Pointer Lock compatibility"""
         try:
             from Quartz.CoreGraphics import (
                 CGEventCreate, CGEventGetLocation, CGEventCreateMouseEvent,
                 CGEventSetIntegerValueField, CGEventPost, kCGHIDEventTap,
-                kCGEventMouseMoved, kCGMouseEventDeltaX, kCGMouseEventDeltaY
+                kCGEventMouseMoved, kCGMouseEventDeltaX, kCGMouseEventDeltaY,
+                CGDisplayBounds, CGMainDisplayID, CGWarpMouseCursorPosition
             )
+            
+            # Get screen bounds
+            screen_bounds = CGDisplayBounds(CGMainDisplayID())
+            screen_width = screen_bounds.size.width
+            screen_height = screen_bounds.size.height
+            screen_center_x = screen_width / 2
+            screen_center_y = screen_height / 2
             
             # Get current mouse position
             event = CGEventCreate(None)
             current_pos = CGEventGetLocation(event)
             
-            # Calculate new position
-            new_x = current_pos.x + delta_x
-            new_y = current_pos.y + delta_y
+            # Strategy: Keep cursor centered to work with Pointer Lock
+            # Pointer Lock expects the cursor to stay in one place while deltas are sent
+            # If cursor drifts too far from center, recenter it
+            distance_from_center = ((current_pos.x - screen_center_x)**2 + (current_pos.y - screen_center_y)**2)**0.5
             
-            # Create mouse move event
+            if distance_from_center > 50:  # If more than 50px from center, recenter
+                # Silently recenter cursor without sending movement event
+                CGWarpMouseCursorPosition((screen_center_x, screen_center_y))
+                new_x = screen_center_x
+                new_y = screen_center_y
+            else:
+                # Keep cursor near center
+                new_x = screen_center_x
+                new_y = screen_center_y
+            
+            # Create mouse move event at center position
             move_event = CGEventCreateMouseEvent(None, kCGEventMouseMoved, (new_x, new_y), 0)
             
-            # Set the delta fields explicitly
+            # Set the delta fields - THIS is what Pointer Lock reads for camera movement
             CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaX, int(delta_x))
             CGEventSetIntegerValueField(move_event, kCGMouseEventDeltaY, int(delta_y))
             
@@ -428,10 +449,15 @@ class KrunkerStyleMouseController:
     
     def update(self, hand_landmarks, gun_active):
         """Update target position from hand tracking (30 FPS) - cursor thread handles smooth movement (120 FPS)"""
+        current_time = time.time()
+        
         if not gun_active or hand_landmarks is None:
-            # Stop cursor thread when gun inactive but keep last position
+            # Stop cursor thread when gun inactive and reset position for repositioning
             self.stop_cursor_thread()
-            # Don't reset last_x and last_y - keep them for continuity
+            # Reset last_x and last_y to allow repositioning when gun is not locked
+            self.last_x = None
+            self.last_y = None
+            self.last_update_time = None  # Mark discontinuation
             with self.thread_lock:
                 self.target_delta_x = 0
                 self.target_delta_y = 0
@@ -450,7 +476,11 @@ class KrunkerStyleMouseController:
             current_x = index_tip.x * 1920
             current_y = index_tip.y * 1080
             
-            if self.last_x is not None and self.last_y is not None:
+            # Check for discontinuation (gap in tracking)
+            is_discontinuation = (self.last_update_time is None or 
+                                 (current_time - self.last_update_time) > self.discontinuation_threshold)
+            
+            if self.last_x is not None and self.last_y is not None and not is_discontinuation:
                 # Calculate raw delta movement
                 raw_delta_x = (current_x - self.last_x) * self.sensitivity
                 raw_delta_y = (current_y - self.last_y) * self.sensitivity
@@ -472,9 +502,14 @@ class KrunkerStyleMouseController:
                     print(f"📍 Cursor Thread: raw=({int(raw_delta_x)},{int(raw_delta_y)}) "
                           f"target=({int(self.target_delta_x)},{int(self.target_delta_y)}) "
                           f"current=({int(self.current_delta_x)},{int(self.current_delta_y)})")
+            elif is_discontinuation:
+                # After discontinuation, just set baseline without applying delta
+                print("🔄 Discontinuation detected - resetting baseline for reswipe")
             
+            # Update tracking state
             self.last_x = current_x
             self.last_y = current_y
+            self.last_update_time = current_time
             
         except Exception as e:
             print(f"Mouse control error: {e}")
@@ -1003,6 +1038,11 @@ class LeaningControlSystem:
                 # Try to bring window to front
                 cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 1)
                 cv2.setWindowProperty('Hybrid Control System', cv2.WND_PROP_TOPMOST, 0)
+                
+                # Check if window was closed (red X button)
+                if cv2.getWindowProperty('Hybrid Control System', cv2.WND_PROP_VISIBLE) < 1:
+                    print("Window closed - exiting...")
+                    break
                 
                 # Handle keyboard input (minimal wait for maximum FPS)
                 try:

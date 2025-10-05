@@ -1,15 +1,50 @@
 # 📦 Building FingerGuns as a macOS App
 
-## Option 1: py2app (Recommended for macOS)
+## 🚀 Quick Start (Recommended)
 
-### Install py2app
+The easiest way to build the app:
+
+```bash
+cd backend
+./build_app.sh
+```
+
+This script will:
+- ✅ Install py2app if needed
+- ✅ Convert applogo.PNG to icon.icns
+- ✅ Build the complete .app bundle
+- ✅ Show you the app size and next steps
+
+### Running the App
+```bash
+open dist/FingerGuns.app
+```
+
+### Installing the App
+```bash
+cp -r dist/FingerGuns.app /Applications/
+```
+
+Then open it from Launchpad or Applications folder!
+
+---
+
+## 📋 Manual Build (Alternative)
+
+If you prefer to build manually:
+
+### 1. Install py2app
 ```bash
 pip install py2app
 ```
 
-### Build the App
+### 2. Create Icon (optional but recommended)
 ```bash
-cd backend
+./create_icon.sh
+```
+
+### 3. Build the App
+```bash
 python setup.py py2app
 ```
 
@@ -17,12 +52,10 @@ This creates:
 - `dist/FingerGuns.app` - Your packaged app!
 - `build/` - Temporary build files (can delete)
 
-### Run the App
+### 4. Run the App
 ```bash
 open dist/FingerGuns.app
 ```
-
-Or drag it to your Applications folder!
 
 ### Clean Build (if you need to rebuild)
 ```bash
