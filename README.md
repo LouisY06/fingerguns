@@ -19,7 +19,7 @@ Built with MediaPipe hand & head tracking, powered by a standard webcam.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/fingerguns.git
+   git clone https://github.com/LouisY06/fingerguns.git
    cd fingerguns
    ```
 
