@@ -4,7 +4,7 @@
 
 Built with MediaPipe hand & head tracking, powered by a standard webcam.
 
-🏆 **1st Place Winner** at [Your Hackathon Name]
+🏆 **1st Place Winner** at Columbia Divhacks 2025
 
 ---
 
