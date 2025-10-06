@@ -17,22 +17,18 @@ Built with MediaPipe hand & head tracking, powered by a standard webcam.
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/LouisY06/fingerguns.git
-   cd fingerguns
-   ```
+1. **Download the latest release**
+   - Go to [Releases](https://github.com/LouisY06/fingerguns/releases)
+   - Download `FingerGuns-Release.zip`
+   - Extract the zip file
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+2. **Double-click `FingerGuns.command`**
+   - The launcher will automatically install dependencies and start the app
 
-3. **Run FingerGuns**
-   ```bash
-   cd backend
-   python leaning_control_system.py
-   ```
+3. **If macOS blocks the app:**
+   - Go to **System Settings** → **Privacy & Security**
+   - Scroll down and click **"Open Anyway"**
+   - Double-click `FingerGuns.command` again
 
 That's it! 🎉
 
@@ -71,20 +67,7 @@ That's it! 🎉
 
 ---
 
-## 🛠️ Building the App (macOS)
 
-To create a standalone `.app` bundle:
-
-```bash
-cd backend
-./build_app.sh
-```
-
-The app will be created in `backend/dist/FingerGuns.app`
-
----
-
-## ⚙️ How It Works
 
 FingerGuns uses a unique dual-threaded architecture:
 
@@ -118,11 +101,6 @@ Built by:
 - **Felix Fan**
 - **Alana Kwan**
 
----
-
-## 📝 License
-
-[Add your license here]
 
 ---
 

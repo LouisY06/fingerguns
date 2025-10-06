@@ -157,3 +157,4 @@ Have fun controlling CS:GO with your hands! 🎮👋
 For issues or questions, visit: https://github.com/LouisY06/fingerguns
 
 
+
